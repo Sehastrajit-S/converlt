@@ -1,0 +1,13 @@
+diff --git a/build/gulpfile.vscode.ts b/build/gulpfile.vscode.ts
+index accd13df..5c34af37 100644
+--- a/build/gulpfile.vscode.ts
++++ b/build/gulpfile.vscode.ts
+@@ -625,7 +625,7 @@ BUILD_TARGETS.forEach(buildTarget => {
+ 			copyCodiconsTask,
+ 			cleanExtensionsBuildTask,
+ 			compileNonNativeExtensionsBuildTask,
+-			compileCopilotExtensionBuildTask,
++			// Converlt: the built-in GitHub Copilot extension is not bundled.
+ 			compileExtensionMediaBuildTask,
+ 			writeISODate('out-build'),
+ 			esbuildBundleTask,

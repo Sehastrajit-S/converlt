@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "converge-runtime"
+version = "0.1.0"
+description = "Optional instrumentation for training runs launched by Converlt."
+requires-python = ">=3.8"
+dependencies = []
+
+[tool.setuptools]
+packages = ["converge"]

@@ -1,0 +1,14 @@
+diff --git a/build/gulpfile.vscode.ts b/build/gulpfile.vscode.ts
+index 5c34af37..abc1d4f8 100644
+--- a/build/gulpfile.vscode.ts
++++ b/build/gulpfile.vscode.ts
+@@ -475,7 +475,8 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
+ function hasAuthenticodeSignature(filePath: string): Promise<boolean> {
+ 	return new Promise((resolve, reject) => {
+ 		const proc = cp.spawn('signtool.exe', ['verify', '/pa', filePath]);
+-		proc.on('error', reject);
++		// Converlt: local builds have no Windows SDK signing tools; treat binaries as unsigned.
++		proc.on('error', (err: NodeJS.ErrnoException) => err.code === 'ENOENT' ? resolve(false) : reject(err));
+ 		proc.on('exit', code => resolve(code === 0));
+ 	});
+ }

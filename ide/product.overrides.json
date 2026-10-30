@@ -1,0 +1,39 @@
+{
+  "nameShort": "Converlt",
+  "nameLong": "Converlt",
+  "applicationName": "converge",
+  "dataFolderName": ".converge-ide",
+  "sharedDataFolderName": ".converge-ide-shared",
+  "win32MutexName": "convergeide",
+  "serverApplicationName": "converge-server",
+  "serverDataFolderName": ".converge-server",
+  "tunnelApplicationName": "converge-tunnel",
+  "win32DirName": "Converlt",
+  "win32NameVersion": "Converlt",
+  "win32RegValueName": "ConverltIDE",
+  "win32x64AppId": "{{A563C256-BDB8-4494-9990-0D1EDDDEAB83}",
+  "win32arm64AppId": "{{06BBA4F6-0815-43B1-A69C-CEBD3BD92F85}",
+  "win32x64UserAppId": "{{70266E0A-8FBA-413C-98A5-09A466405F21}",
+  "win32arm64UserAppId": "{{3B885640-C524-4D7F-A991-500E35880360}",
+  "win32AppUserModelId": "Converlt.IDE",
+  "win32ShellNameShort": "C&onverge",
+  "win32TunnelServiceMutex": "convergeide-tunnelservice",
+  "win32TunnelMutex": "convergeide-tunnel",
+  "darwinBundleIdentifier": "dev.converge.ide",
+  "darwinProfileUUID": "869861C1-1085-4198-8B74-E361AF300AF7",
+  "darwinProfilePayloadUUID": "1B22FAE1-53C4-4EC0-AE9F-376DB6F88F2D",
+  "linuxDesktopName": "dev.converge.Converlt",
+  "linuxIconName": "converge",
+  "urlProtocol": "converge",
+  "reportIssueUrl": "https://github.com/converge-dev/converge/issues/new",
+  "voiceWsUrl": null,
+  "extensionsGallery": {
+    "serviceUrl": "https://open-vsx.org/vscode/gallery",
+    "itemUrl": "https://open-vsx.org/vscode/item",
+    "latestUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest",
+    "controlUrl": "https://raw.githubusercontent.com/EclipseFdn/publish-extensions/refs/heads/master/extension-control/extensions.json"
+  },
+  "linkProtectionTrustedDomains": [
+    "https://open-vsx.org"
+  ]
+}

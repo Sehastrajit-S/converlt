@@ -1,0 +1,135 @@
+/*---------------------------------------------------------------------------------------------
+ *  Converlt title bar: mode switch, compute target and credits.
+ *--------------------------------------------------------------------------------------------*/
+
+.monaco-action-bar .action-item.converlt-titlebar-item {
+	-webkit-app-region: no-drag;
+	margin-left: 8px;
+}
+
+.converlt-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	height: 26px;
+}
+
+.converlt-title .converlt-seg {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 24px;
+	padding: 0 9px;
+	border-radius: 6px;
+	border: 1px solid var(--vscode-commandCenter-border, transparent);
+	background: var(--vscode-commandCenter-background, transparent);
+	color: var(--vscode-titleBar-activeForeground);
+	font: inherit;
+	font-size: 12px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.converlt-title .converlt-seg:hover {
+	background: var(--vscode-commandCenter-activeBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+.converlt-title .converlt-seg:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+.converlt-title .codicon {
+	font-size: 14px;
+}
+
+/* Dashboard | Code */
+.converlt-title .converlt-modes {
+	display: inline-flex;
+	padding: 2px;
+	gap: 2px;
+	border-radius: 8px;
+	border: 1px solid var(--vscode-commandCenter-border, transparent);
+	background: var(--vscode-commandCenter-background, transparent);
+}
+
+.converlt-title .converlt-modes .converlt-seg {
+	height: 20px;
+	border: none;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	padding: 0 8px;
+	border-radius: 5px;
+}
+
+.converlt-title .converlt-modes .converlt-seg.on {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
+.converlt-title .converlt-modes .converlt-seg:not(.on):hover {
+	color: var(--vscode-titleBar-activeForeground);
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* Compute target */
+.converlt-title .converlt-seg.target .converlt-label {
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.converlt-title .converlt-seg.target .codicon-chevron-down {
+	font-size: 12px;
+	opacity: 0.7;
+}
+
+.converlt-title .converlt-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--vscode-disabledForeground);
+	flex-shrink: 0;
+}
+
+.converlt-title .converlt-dot.running,
+.converlt-title .converlt-dot.ready {
+	background: var(--vscode-testing-iconPassed, #34c77b);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-testing-iconPassed, #34c77b) 22%, transparent);
+}
+
+.converlt-title .converlt-dot.starting {
+	background: var(--vscode-charts-blue, #4aa8ff);
+	animation: converlt-pulse 1.2s ease-in-out infinite;
+}
+
+.converlt-title .converlt-dot.unreachable {
+	background: var(--vscode-charts-yellow, #f2a93b);
+}
+
+@keyframes converlt-pulse {
+	50% {
+		opacity: 0.35;
+	}
+}
+
+/* Credits */
+.converlt-title .converlt-seg.credits .codicon {
+	color: var(--vscode-textLink-foreground);
+}
+
+.converlt-title .converlt-seg.credits .converlt-label {
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+}
+
+.converlt-title .converlt-seg.credits .converlt-burn {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	font-variant-numeric: tabular-nums;
+}
+
+.converlt-title .converlt-seg.credits.empty {
+	border-color: var(--vscode-inputValidation-errorBorder, #f25767);
+}
+

@@ -1,0 +1,59 @@
+{
+  "name": "converge-defaults",
+  "displayName": "Converlt Defaults",
+  "description": "Theme and default settings for the Converlt IDE.",
+  "version": "0.1.0",
+  "publisher": "converge",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "id": "Converlt Dark",
+        "label": "Converlt Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/converge-dark.json"
+      },
+      {
+        "id": "Converlt Light",
+        "label": "Converlt Light",
+        "uiTheme": "vs",
+        "path": "./themes/converge-light.json"
+      }
+    ],
+    "configurationDefaults": {
+      "workbench.colorTheme": "Converlt Dark",
+      "workbench.preferredDarkColorTheme": "Converlt Dark",
+      "workbench.preferredLightColorTheme": "Converlt Light",
+      "workbench.startupEditor": "none",
+      "workbench.tips.enabled": false,
+      "window.commandCenter": true,
+      "window.title": "${rootName}${separator}Converlt",
+      "workbench.activityBar.location": "top",
+      "workbench.secondarySideBar.defaultVisibility": "visible",
+      "workbench.editor.empty.hint": "hidden",
+      "window.density.editorTabHeight": "compact",
+      "chat.agentsControl.enabled": "hidden",
+      "chat.titleBar.signIn.enabled": false,
+      "chat.titleBar.openInAgentsWindow.enabled": false,
+      "editor.fontFamily": "'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+      "editor.fontSize": 13.5,
+      "editor.lineHeight": 1.6,
+      "editor.renderLineHighlight": "all",
+      "editor.cursorBlinking": "smooth",
+      "editor.smoothScrolling": true,
+      "editor.minimap.renderCharacters": false,
+      "files.exclude": {
+        "**/.converge": true
+      },
+      "telemetry.telemetryLevel": "off",
+      "update.mode": "none",
+      "window.menuBarVisibility": "compact"
+    }
+  }
+}

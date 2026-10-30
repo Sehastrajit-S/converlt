@@ -1,0 +1,22 @@
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+.venv/
+.converge/
+.DS_Store
+.cache/
+
+# Code-OSS checkout and build output (see ide/README.md)
+ide/vscode/
+ide/out/
+ide/VSCode-*/
+
+# Local Converlt Gateway data (ledger, logs)
+services/gateway/data/
+*.db
+*.db-wal
+*.db-shm
+*.log

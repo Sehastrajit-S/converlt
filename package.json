@@ -1,0 +1,22 @@
+{
+  "name": "converge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Converlt — the ML development environment that connects your code, GPUs, and experiments.",
+  "packageManager": "pnpm@11.6.0",
+  "scripts": {
+    "dev": "pnpm --filter @converge/desktop dev",
+    "build": "pnpm --filter @converge/desktop build",
+    "start": "pnpm --filter @converge/desktop start",
+    "build:extension": "pnpm --filter converge build",
+    "ide:fetch": "bash ide/fetch.sh",
+    "ide:build": "bash ide/build.sh",
+    "ide:build:dev": "bash ide/build.sh --dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:agent": "python -m unittest discover -s services/remote-agent/tests -v"
+  },
+  "devDependencies": {
+    "@types/vscode": "1.140.0"
+  }
+}

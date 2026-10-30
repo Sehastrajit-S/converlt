@@ -1,0 +1,4 @@
+# Applied to every MSBuild invocation under ide/vscode (native node modules).
+# Spectre-mitigated MSVC libs are not installed and C: has no room for them; a global
+# property (unlike Directory.Build.targets) also fixes the library search path.
+/p:SpectreMitigation=false

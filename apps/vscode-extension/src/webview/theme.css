@@ -1,0 +1,73 @@
+/*
+ * Maps Converlt's design tokens onto the active VS Code theme, so the screens look native
+ * in any color theme. Loaded after @converge/ui/styles.css; same selector, so it wins.
+ */
+:root {
+  --bg: var(--vscode-editor-background);
+  --bg-sunken: var(--vscode-editor-background);
+  --surface: color-mix(in srgb, var(--vscode-editor-background), var(--vscode-foreground) 3.5%);
+  --surface-2: color-mix(in srgb, var(--vscode-editor-background), var(--vscode-foreground) 5%);
+  --surface-3: color-mix(in srgb, var(--vscode-editor-background), var(--vscode-foreground) 9%);
+  --hover: color-mix(in srgb, transparent, var(--vscode-foreground) 6%);
+  --active: color-mix(in srgb, transparent, var(--vscode-foreground) 10%);
+  --border: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-editor-background), var(--vscode-foreground) 12%));
+  --border-strong: color-mix(in srgb, var(--vscode-editor-background), var(--vscode-foreground) 20%);
+  --text: var(--vscode-foreground);
+  --text-2: var(--vscode-descriptionForeground);
+  --text-3: color-mix(in srgb, var(--vscode-descriptionForeground), var(--vscode-editor-background) 30%);
+  --accent: var(--vscode-button-background);
+  --accent-hover: var(--vscode-button-hoverBackground);
+  --accent-soft: color-mix(in srgb, transparent, var(--vscode-button-background) 16%);
+  --accent-text: var(--vscode-textLink-foreground);
+  --ok: var(--vscode-charts-green, #34c77b);
+  --warn: var(--vscode-charts-yellow, #f2a93b);
+  --err: var(--vscode-errorForeground, #f25767);
+  --info: var(--vscode-charts-blue, #4aa8ff);
+  --ok-soft: color-mix(in srgb, transparent, var(--ok) 14%);
+  --warn-soft: color-mix(in srgb, transparent, var(--warn) 14%);
+  --err-soft: color-mix(in srgb, transparent, var(--err) 13%);
+  --info-soft: color-mix(in srgb, transparent, var(--info) 13%);
+  --s1: var(--vscode-charts-purple, #8b6cff);
+  --s2: var(--vscode-charts-blue, #4aa8ff);
+  --s3: var(--vscode-charts-orange, #f2a93b);
+  --s4: var(--vscode-charts-red, #f06fb0);
+  --s5: var(--vscode-charts-green, #34c77b);
+  --s6: var(--vscode-charts-yellow, #9bd25b);
+  --grid: color-mix(in srgb, transparent, var(--vscode-foreground) 8%);
+  --shadow: none;
+  --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.35);
+  --font: var(--vscode-font-family);
+  --mono: var(--vscode-editor-font-family);
+}
+
+body.vscode-light {
+  color-scheme: light;
+}
+body.vscode-dark,
+body.vscode-high-contrast {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  overflow: auto;
+  font-size: var(--vscode-font-size, 13px);
+  padding: 0;
+}
+
+.page {
+  padding: 22px 28px 40px;
+}
+
+.btn.primary {
+  color: var(--vscode-button-foreground);
+  box-shadow: none;
+}
+
+.overlay {
+  backdrop-filter: none;
+}
+
+.logs {
+  height: calc(100vh - 420px);
+}

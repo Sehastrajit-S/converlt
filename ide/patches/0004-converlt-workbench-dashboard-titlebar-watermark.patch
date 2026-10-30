@@ -1,0 +1,48 @@
+diff --git a/src/vs/workbench/browser/parts/editor/editorGroupWatermark.ts b/src/vs/workbench/browser/parts/editor/editorGroupWatermark.ts
+index a63f37ce..f67fe7b7 100644
+--- a/src/vs/workbench/browser/parts/editor/editorGroupWatermark.ts
++++ b/src/vs/workbench/browser/parts/editor/editorGroupWatermark.ts
+@@ -44,9 +44,14 @@ const toggleTerminal: WatermarkEntry = { text: localize({ key: 'watermark.toggle
+ const startDebugging: WatermarkEntry = { text: localize('watermark.startDebugging', "Start Debugging"), id: 'workbench.action.debug.start', when: { web: ContextKeyExpr.equals('terminalProcessSupported', true) } };
+ const openSettings: WatermarkEntry = { text: localize('watermark.openSettings', "Open Settings"), id: 'workbench.action.openSettings' };
+ 
++// Converlt: the empty editor offers the ML workflow first.
++const converltDashboard: WatermarkEntry = { text: localize('watermark.converltDashboard', "Converlt Dashboard"), id: 'converlt.showDashboard' };
++const converltRun: WatermarkEntry = { text: localize('watermark.converltRun', "Run Training on GPU"), id: 'converge.runTraining' };
++const converltGpus: WatermarkEntry = { text: localize('watermark.converltGpus', "Launch a Cloud GPU"), id: 'converge.openGpus' };
++
+ const baseEntries: WatermarkEntry[] = [
++	converltDashboard,
+ 	openChat,
+-	showCommands,
+ ];
+ 
+ const emptyWindowEntries: WatermarkEntry[] = coalesce([
+@@ -58,9 +63,13 @@ const emptyWindowEntries: WatermarkEntry[] = coalesce([
+ 
+ const workspaceEntries: WatermarkEntry[] = [
+ 	...baseEntries,
++	converltRun,
++	converltGpus,
++	gotoFile,
+ ];
+ 
+ const otherEntries: WatermarkEntry[] = [
++	showCommands,
+ 	gotoFile,
+ 	findInFiles,
+ 	startDebugging,
+diff --git a/src/vs/workbench/workbench.common.main.ts b/src/vs/workbench/workbench.common.main.ts
+index b2aaf10f..da32b0dc 100644
+--- a/src/vs/workbench/workbench.common.main.ts
++++ b/src/vs/workbench/workbench.common.main.ts
+@@ -384,6 +384,9 @@ import './contrib/themes/browser/themes.contribution.js';
+ // Update
+ import './contrib/update/browser/update.contribution.js';
+ 
++// Converlt
++import './contrib/converlt/browser/converlt.contribution.js';
++
+ // Surveys
+ import './contrib/surveys/browser/nps.contribution.js';
+ import './contrib/surveys/browser/languageSurveys.contribution.js';

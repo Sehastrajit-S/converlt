@@ -1,0 +1,677 @@
+{
+  "name": "converge",
+  "displayName": "Converlt",
+  "description": "Train on any GPU from your editor: remote runs, live metrics, NaN/OOM diagnostics, experiment history and comparison.",
+  "version": "0.1.0",
+  "publisher": "converge",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.140.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Data Science",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"src/**/*.test.ts\""
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "converge",
+          "title": "Converlt",
+          "icon": "media/converge.svg"
+        }
+      ]
+    },
+    "views": {
+      "converge": [
+        {
+          "id": "converge.cloud",
+          "name": "Cloud"
+        },
+        {
+          "id": "converge.runs",
+          "name": "Runs"
+        },
+        {
+          "id": "converge.compute",
+          "name": "Compute"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "converge.runs",
+        "contents": "No runs in this workspace yet.\n[Run Training on GPU](command:converge.runTraining)\nConverge syncs your code to a GPU machine, runs it under a supervisor, and records every run.",
+        "when": "workspaceFolderCount > 0"
+      },
+      {
+        "view": "converge.runs",
+        "contents": "Open a folder with your training code to start.\n[Open Folder](command:workbench.action.files.openFolder)",
+        "when": "workspaceFolderCount == 0"
+      },
+      {
+        "view": "converge.compute",
+        "contents": "Connect a GPU machine over SSH, or use your local GPU through WSL.\n[Add Machine](command:converge.addMachine)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "converge.runTraining",
+        "title": "Run Training on GPU…",
+        "category": "Converlt",
+        "icon": "$(play)"
+      },
+      {
+        "command": "converge.runFile",
+        "title": "Run on GPU",
+        "category": "Converlt",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "converge.openRuns",
+        "title": "Open Runs Dashboard",
+        "category": "Converlt",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "converge.openRun",
+        "title": "Open Run",
+        "category": "Converlt"
+      },
+      {
+        "command": "converge.compareRuns",
+        "title": "Compare Runs",
+        "category": "Converlt",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "converge.cancelRun",
+        "title": "Stop Run",
+        "category": "Converlt",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "converge.reproduceRun",
+        "title": "Reproduce Run",
+        "category": "Converlt",
+        "icon": "$(history)"
+      },
+      {
+        "command": "converge.reconnectRun",
+        "title": "Reconnect to Run",
+        "category": "Converlt"
+      },
+      {
+        "command": "converge.openCompute",
+        "title": "Open Compute Dashboard",
+        "category": "Converlt",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "converge.addMachine",
+        "title": "Add Machine…",
+        "category": "Converlt",
+        "icon": "$(add)"
+      },
+      {
+        "command": "converge.testMachine",
+        "title": "Test Connection",
+        "category": "Converlt",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "converge.removeMachine",
+        "title": "Remove Machine",
+        "category": "Converlt",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "converge.refresh",
+        "title": "Refresh",
+        "category": "Converlt",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "converge.openSettings",
+        "title": "Settings",
+        "category": "Converlt",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "converge.openHome",
+        "title": "Open Dashboard (tab)",
+        "category": "Converlt",
+        "icon": "$(home)"
+      },
+      {
+        "command": "converge.openWallet",
+        "title": "Open Wallet",
+        "category": "Converlt",
+        "icon": "$(credit-card)"
+      },
+      {
+        "command": "converge.openGpus",
+        "title": "Launch a Cloud GPU",
+        "category": "Converlt",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "converge.openModels",
+        "title": "Browse Models",
+        "category": "Converlt",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "converge.openEnvironments",
+        "title": "Manage Environments",
+        "category": "Converlt",
+        "icon": "$(package)"
+      },
+      {
+        "command": "converge.cloudSignIn",
+        "title": "Sign in to Converlt Cloud",
+        "category": "Converlt",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "converge.cloudSignOut",
+        "title": "Sign out of Converlt Cloud",
+        "category": "Converlt",
+        "icon": "$(sign-out)"
+      },
+      {
+        "command": "converge.openDashboard",
+        "title": "Open Dashboard",
+        "category": "Converlt",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "converge.computeMenu",
+        "title": "Choose GPU Machine",
+        "category": "Converlt",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "converge.dashboard",
+        "title": "Show Dashboard",
+        "category": "Converlt",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "converge.openHub",
+        "title": "Datasets & Models",
+        "category": "Converlt",
+        "icon": "$(database)"
+      },
+      {
+        "command": "converge.connectAgents",
+        "title": "Connect Claude Code & Codex",
+        "category": "Converlt",
+        "icon": "$(plug)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "converge.runTraining",
+          "when": "view == converge.runs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "converge.openRuns",
+          "when": "view == converge.runs",
+          "group": "navigation@2"
+        },
+        {
+          "command": "converge.compareRuns",
+          "when": "view == converge.runs",
+          "group": "navigation@3"
+        },
+        {
+          "command": "converge.addMachine",
+          "when": "view == converge.compute",
+          "group": "navigation@1"
+        },
+        {
+          "command": "converge.openCompute",
+          "when": "view == converge.compute",
+          "group": "navigation@2"
+        },
+        {
+          "command": "converge.openSettings",
+          "when": "view == converge.compute",
+          "group": "navigation@3"
+        },
+        {
+          "command": "converge.openGpus",
+          "when": "view == converge.cloud",
+          "group": "navigation@1"
+        },
+        {
+          "command": "converge.openHome",
+          "when": "view == converge.cloud",
+          "group": "navigation@2"
+        },
+        {
+          "command": "converge.refresh",
+          "when": "view == converge.cloud",
+          "group": "navigation@3"
+        },
+        {
+          "command": "converge.cloudSignOut",
+          "when": "view == converge.cloud",
+          "group": "z_cloud@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "converge.cancelRun",
+          "when": "view == converge.runs && viewItem =~ /^run\\.active/",
+          "group": "inline"
+        },
+        {
+          "command": "converge.reproduceRun",
+          "when": "view == converge.runs && viewItem =~ /^run\\./",
+          "group": "1_run@1"
+        },
+        {
+          "command": "converge.compareRuns",
+          "when": "view == converge.runs && viewItem =~ /^run\\./",
+          "group": "1_run@2"
+        },
+        {
+          "command": "converge.cancelRun",
+          "when": "view == converge.runs && viewItem =~ /^run\\.active/",
+          "group": "1_run@3"
+        },
+        {
+          "command": "converge.reconnectRun",
+          "when": "view == converge.runs && viewItem =~ /^run\\.active/",
+          "group": "1_run@4"
+        },
+        {
+          "command": "converge.testMachine",
+          "when": "view == converge.compute && viewItem == machine",
+          "group": "inline"
+        },
+        {
+          "command": "converge.removeMachine",
+          "when": "view == converge.compute && viewItem == machine",
+          "group": "1_machine@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "converge.runFile",
+          "when": "resourceLangId == python",
+          "group": "navigation@-10"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "converge.runFile",
+          "when": "resourceLangId == python",
+          "group": "converge@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "converge.openRun",
+          "when": "false"
+        },
+        {
+          "command": "converge.cancelRun",
+          "when": "false"
+        },
+        {
+          "command": "converge.reproduceRun",
+          "when": "false"
+        },
+        {
+          "command": "converge.reconnectRun",
+          "when": "false"
+        },
+        {
+          "command": "converge.testMachine",
+          "when": "false"
+        },
+        {
+          "command": "converge.removeMachine",
+          "when": "false"
+        },
+        {
+          "command": "converge.runFile",
+          "when": "resourceLangId == python"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Converlt",
+      "properties": {
+        "converge.defaultCommand": {
+          "type": "string",
+          "default": "python train.py",
+          "description": "Command prefilled when launching a run."
+        },
+        "converge.remoteRoot": {
+          "type": "string",
+          "default": "~/converge",
+          "description": "Folder on GPU machines where projects are synced (<remoteRoot>/<project>)."
+        },
+        "converge.sshPath": {
+          "type": "string",
+          "default": "ssh",
+          "description": "OpenSSH executable. Converlt uses your ssh config, keys and agent."
+        },
+        "converge.sync.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra glob patterns to skip when syncing code. Checkpoints, datasets, environments and credentials are always skipped."
+        },
+        "converge.sync.maxFileSizeMB": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "description": "Files larger than this are not synced."
+        },
+        "converge.runs.stopOnNan": {
+          "type": "boolean",
+          "default": false,
+          "description": "Stop a run as soon as a non-finite metric is logged."
+        },
+        "converge.runs.stallMinutes": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "description": "Warn when a run produces no output for this many minutes (0 disables)."
+        },
+        "converge.runs.telemetryIntervalSeconds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 2,
+          "description": "Seconds between GPU telemetry samples."
+        },
+        "converge.runs.cancelGraceSeconds": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "description": "Seconds between SIGTERM and SIGKILL when stopping a run."
+        },
+        "converge.notifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when a run finishes."
+        },
+        "converge.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run on GPU above Python entry points."
+        },
+        "converge.chat.models": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "anthropic/claude-sonnet-5.5",
+            "anthropic/claude-opus-5.5",
+            "anthropic/claude-haiku-5.5",
+            "openai/gpt-6.1-sol",
+            "openai/gpt-6.1-terra",
+            "google/gemini-4-argon",
+            "google/gemini-3.8-flash",
+            "deepseek/deepseek-v4-pro-0813",
+            "qwen/qwen3.8-max-0902",
+            "moonshotai/kimi-k3.1-pro",
+            "x-ai/grok-4.7",
+            "mistralai/devstral-2512"
+          ],
+          "description": "OpenRouter model ids shown in the chat model picker (paid from Converlt credits). The first is the default."
+        }
+      }
+    },
+    "chatParticipants": [
+      {
+        "id": "converlt.assistant",
+        "name": "converlt",
+        "fullName": "Converlt",
+        "description": "Ask about your code, runs and GPUs",
+        "isDefault": true,
+        "modes": [
+          "ask",
+          "edit",
+          "agent"
+        ],
+        "locations": [
+          "panel"
+        ]
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "converlt",
+        "displayName": "Converlt Cloud"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "converlt_listFiles",
+        "toolReferenceName": "converltFiles",
+        "displayName": "List project files",
+        "modelDescription": "List the open project's files (relative paths), optionally filtered by a substring.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(files)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filter": {
+              "type": "string",
+              "description": "Case-insensitive substring of the path"
+            }
+          }
+        }
+      },
+      {
+        "name": "converlt_readFile",
+        "toolReferenceName": "converltRead",
+        "displayName": "Read file",
+        "modelDescription": "Read a file from the open project with line numbers (the editor's current text, including unsaved changes).",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(file-code)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Project-relative path"
+            },
+            "startLine": {
+              "type": "integer"
+            },
+            "endLine": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      },
+      {
+        "name": "converlt_searchText",
+        "toolReferenceName": "converltSearch",
+        "displayName": "Search code",
+        "modelDescription": "Search the project's code and config files. Returns path:line: text.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(search)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "isRegex": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "converlt_listRuns",
+        "toolReferenceName": "converltRuns",
+        "displayName": "List training runs",
+        "modelDescription": "List this project's Converlt training runs: status, metric, diagnostics, machine, command.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(beaker)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "converlt_getRun",
+        "toolReferenceName": "converltRun",
+        "displayName": "Inspect a training run",
+        "modelDescription": "Details of one Converlt run: command, config, git commit, metrics, diagnostics (NaN, OOM, crash analysis) and the last log lines.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(beaker)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "description": "Run name (e.g. run-003) or id"
+            }
+          },
+          "required": [
+            "run"
+          ]
+        }
+      },
+      {
+        "name": "converlt_listMachines",
+        "toolReferenceName": "converltMachines",
+        "displayName": "List GPU machines",
+        "modelDescription": "List the user's GPU machines (SSH, WSL and Converlt cloud pods) with readiness, GPUs and PyTorch.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(server-environment)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "converlt_listDownloads",
+        "toolReferenceName": "converltDownloads",
+        "displayName": "List downloaded datasets and models",
+        "modelDescription": "List datasets and models downloaded from Hugging Face or Kaggle onto the user's GPU machines, with their exact paths on each machine.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(database)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "converlt_wallet",
+        "toolReferenceName": "converltwallet",
+        "displayName": "Converlt wallet",
+        "modelDescription": "The user's Converlt credit balance, current spend per hour, and running cloud GPU pods with their cost.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(credit-card)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "converlt_launchRun",
+        "toolReferenceName": "converltlaunchRun",
+        "displayName": "Launch a training run",
+        "modelDescription": "Launch a training run on a GPU machine through Converlt: syncs the project, runs the command under Converlt's supervisor, and records metrics and diagnostics. The user approves every launch. Returns the run name; follow it with converlt_getRun.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(rocket)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Shell command run in the project root on the machine"
+            },
+            "machine": {
+              "type": "string",
+              "description": "Machine name; omit for the default"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      },
+      {
+        "name": "converlt_stopRun",
+        "toolReferenceName": "converltstopRun",
+        "displayName": "Stop a training run",
+        "modelDescription": "Stop a running Converlt training run (SIGTERM, then SIGKILL after the grace period). The user approves it.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(debug-stop)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "description": "Run name or id"
+            }
+          },
+          "required": [
+            "run"
+          ]
+        }
+      }
+    ]
+  },
+  "devDependencies": {
+    "@converge/core": "workspace:*",
+    "@converge/run-protocol": "workspace:*",
+    "@converge/ui": "workspace:*",
+    "@types/node": "^22.18.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/vscode": "1.140.0",
+    "esbuild": "0.28.2",
+    "lucide-react": "1.55.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "5.9.3"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In Restricted Mode, Converlt shows your wallet, GPUs, models and run history, but doesn't sync or run the folder's code until you trust it."
+    },
+    "virtualWorkspaces": false
+  },
+  "enabledApiProposals": [
+    "defaultChatParticipant",
+    "chatParticipantAdditions",
+    "chatProvider"
+  ]
+}

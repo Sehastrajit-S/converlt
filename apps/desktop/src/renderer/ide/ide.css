@@ -1,0 +1,471 @@
+/* IDE shell: floating side bar and editor cards on a sunken frame, like the Converlt IDE. */
+
+.ide {
+  display: grid;
+  grid-template-rows: var(--titlebar) 1fr 24px;
+  height: 100%;
+  background: var(--bg-sunken);
+}
+
+.ide-titlebar {
+  border-bottom: none;
+  background: var(--bg-sunken);
+  gap: 8px;
+}
+.ide-titlebar .btn.icon.on {
+  color: var(--text);
+}
+
+.command-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(520px, 40vw);
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-align: left;
+}
+.command-center:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border-color: var(--border-strong);
+}
+.command-center .truncate {
+  flex: 1;
+  text-align: center;
+}
+
+.ide-body {
+  display: flex;
+  min-height: 0;
+  padding: 0 6px;
+}
+
+/* ------------------------------------------------------------ side bar */
+
+.side {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.side-resize {
+  width: 6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+}
+.side-resize:hover,
+.resizing .side-resize {
+  background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat;
+  opacity: 0.6;
+}
+body.resizing {
+  cursor: col-resize;
+}
+body.resizing * {
+  user-select: none !important;
+}
+
+.side-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 6px 4px;
+}
+.side-tab {
+  position: relative;
+  width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-3);
+}
+.side-tab:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.side-tab.active {
+  color: var(--text);
+  background: var(--active);
+}
+.side-badge {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+}
+
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 34px;
+  padding: 0 6px 0 14px;
+  font-weight: 650;
+  font-size: 14px;
+  color: var(--text);
+}
+.side-head .btn.icon {
+  width: 24px;
+  height: 24px;
+  color: var(--text-3);
+}
+.side-body {
+  flex: 1;
+  overflow: auto;
+  padding: 2px 4px 10px;
+}
+.side-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  height: 26px;
+  padding-right: 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-2);
+  text-align: left;
+  white-space: nowrap;
+  font-size: 13.5px;
+}
+.tree-row:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.tree-row.active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.run-row {
+  gap: 8px;
+  padding-left: 10px;
+  height: 28px;
+}
+.chev {
+  flex-shrink: 0;
+  color: var(--text-3);
+  transition: transform 0.12s;
+}
+.chev.open {
+  transform: rotate(90deg);
+}
+.chev-space {
+  width: 13px;
+  flex-shrink: 0;
+}
+
+.ficon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.ficon.dir {
+  color: #8f9bb3;
+}
+.ficon.code {
+  color: var(--info);
+}
+.ficon.conf {
+  color: var(--warn);
+}
+.ficon.text {
+  color: var(--text-2);
+}
+.ficon.img {
+  color: var(--s4);
+}
+.ficon.accent {
+  color: var(--accent-text);
+}
+
+/* ------------------------------------------------------------ editor area */
+
+.workbench {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  height: 35px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.tabs-scroll {
+  display: flex;
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tabs-scroll::-webkit-scrollbar {
+  height: 3px;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 6px 0 12px;
+  border-right: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: default;
+  position: relative;
+}
+.tab:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.tab.active {
+  background: var(--bg);
+  color: var(--text);
+}
+.tab.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1.5px;
+  background: var(--accent);
+}
+.tab.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--bg);
+}
+.tab-close {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-3);
+  visibility: hidden;
+}
+.tab-close > * {
+  grid-area: 1 / 1;
+}
+.tab-close:hover {
+  background: var(--active);
+  color: var(--text);
+}
+.tab.active .tab-close,
+.tab:hover .tab-close,
+.tab.dirty .tab-close {
+  visibility: visible;
+}
+.tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-2);
+  display: none;
+}
+.tab.dirty .tab-dot {
+  display: block;
+}
+.tab.dirty .tab-close svg {
+  display: none;
+}
+.tab.dirty .tab-close:hover .tab-dot {
+  display: none;
+}
+.tab.dirty .tab-close:hover svg {
+  display: block;
+}
+.tab-action {
+  margin: 0 6px;
+  flex-shrink: 0;
+  color: var(--accent-text);
+}
+
+.breadcrumbs {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: pre;
+  overflow: hidden;
+}
+
+.workbench-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+}
+.pane-scroll {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+}
+
+.code-editor {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.code-editor-host {
+  position: absolute;
+  inset: 0;
+}
+.editor-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.code-editor .monaco-editor {
+  --vscode-focusBorder: transparent;
+}
+
+.empty-editor {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  opacity: 0.9;
+}
+.shortcuts {
+  display: grid;
+  gap: 4px;
+  min-width: 260px;
+}
+.shortcuts > button,
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-2);
+  text-align: left;
+}
+.shortcuts > button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------ quick open */
+
+.quick-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+.quick-open {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(600px, 90vw);
+  z-index: 61;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+.quick-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  height: 38px;
+  border-bottom: 1px solid var(--border);
+}
+.quick-input input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: none;
+  font-size: 13px;
+}
+.quick-list {
+  max-height: 420px;
+  overflow: auto;
+  padding: 4px;
+}
+.quick-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  white-space: nowrap;
+}
+.quick-item.sel {
+  background: var(--accent-soft);
+}
+
+.ide .statusbar {
+  background: var(--bg-sunken);
+  border-top: none;
+}
