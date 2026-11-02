@@ -4,6 +4,10 @@ import path from "node:path";
 export interface Config {
   port: number;
   dataDir: string;
+  /** Postgres connection string. When set, the ledger lives there instead of a SQLite file in dataDir. */
+  databaseUrl: string;
+  /** Bearer secret for GET /cron/meter (Vercel sends CRON_SECRET with its cron calls). Disabled when empty. */
+  cronSecret: string;
   /** Bearer token for /admin endpoints. Admin routes are disabled when empty. */
   adminToken: string;
   runpodApiKey: string;
@@ -32,6 +36,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     port,
     dataDir: path.resolve(env.CONVERLT_DATA_DIR ?? "data"),
+    databaseUrl: env.DATABASE_URL ?? env.POSTGRES_URL ?? "",
+    cronSecret: env.CRON_SECRET ?? "",
     adminToken: env.CONVERLT_ADMIN_TOKEN ?? "",
     runpodApiKey: env.RUNPOD_API_KEY ?? "",
     openrouterApiKey: env.OPENROUTER_API_KEY ?? "",
@@ -45,6 +51,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     storageStoppedUsdPerGbMonth: num(env.STORAGE_STOPPED_USD_PER_GB_MONTH, 0.2),
     minLaunchHours: num(env.MIN_LAUNCH_HOURS, 1),
     meterIntervalMs: num(env.METER_INTERVAL_MS, 30_000),
-    publicUrl: env.CONVERLT_PUBLIC_URL ?? `http://localhost:${port}`,
+    publicUrl: env.CONVERLT_PUBLIC_URL ?? (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : `http://localhost:${port}`),
   };
 }

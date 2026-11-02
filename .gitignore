@@ -20,3 +20,6 @@ services/gateway/data/
 *.db-wal
 *.db-shm
 *.log
+
+# Vercel build output of the gateway
+.vercel/

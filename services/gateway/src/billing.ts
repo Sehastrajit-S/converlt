@@ -47,19 +47,26 @@ export class Billing {
 
   // ------------------------------------------------------------ wallet
 
-  wallet(user: UserRow, now = Date.now()): WalletSummary {
+  async wallet(user: UserRow, now = Date.now()): Promise<WalletSummary> {
     const s = this.store;
-    const pods = s.userPods(user.id);
+    const pods = await s.userPods(user.id);
     const burn = pods.reduce((sum, p) => sum + (p.status === "running" || p.status === "starting" ? p.rate_running : p.status === "stopped" ? p.rate_stopped : 0), 0);
     const day = startOfUtcDay(now);
     const month = startOfUtcMonth(now);
+    const [balance, gpuDay, gpuMonth, modelsDay, modelsMonth] = await Promise.all([
+      s.balanceMicro(user.id),
+      s.spentSince(user.id, ["gpu", "storage"], day),
+      s.spentSince(user.id, ["gpu", "storage"], month),
+      s.spentSince(user.id, ["model"], day),
+      s.spentSince(user.id, ["model"], month),
+    ]);
     return {
       user: { id: user.id, email: user.email, name: user.name },
-      balance: fromMicro(s.balanceMicro(user.id)),
+      balance: fromMicro(balance),
       creditsPerUsd: this.cfg.creditsPerUsd,
       spend: {
-        gpu: { day: fromMicro(s.spentSince(user.id, ["gpu", "storage"], day)), month: fromMicro(s.spentSince(user.id, ["gpu", "storage"], month)) },
-        models: { day: fromMicro(s.spentSince(user.id, ["model"], day)), month: fromMicro(s.spentSince(user.id, ["model"], month)) },
+        gpu: { day: fromMicro(gpuDay), month: fromMicro(gpuMonth) },
+        models: { day: fromMicro(modelsDay), month: fromMicro(modelsMonth) },
       },
       limits: s.limits(user),
       activePods: pods.filter((p) => p.status === "running" || p.status === "starting").length,
@@ -68,11 +75,11 @@ export class Billing {
   }
 
   /** Why the user can't spend on this category right now, or null if they can. */
-  private blocker(user: UserRow, kind: "gpu" | "models", now = Date.now()): string | null {
-    if (this.store.balanceMicro(user.id) <= 0) return "Out of credits. Add credits to continue.";
+  private async blocker(user: UserRow, kind: "gpu" | "models", now = Date.now()): Promise<string | null> {
+    if ((await this.store.balanceMicro(user.id)) <= 0) return "Out of credits. Add credits to continue.";
     const cap = kind === "gpu" ? user.gpu_monthly_cap : user.models_monthly_cap;
     if (cap !== null) {
-      const spent = this.store.spentSince(user.id, kind === "gpu" ? ["gpu", "storage"] : ["model"], startOfUtcMonth(now));
+      const spent = await this.store.spentSince(user.id, kind === "gpu" ? ["gpu", "storage"] : ["model"], startOfUtcMonth(now));
       if (spent >= cap) return `Your monthly ${kind === "gpu" ? "GPU" : "model"} limit is used up. Raise it in your wallet to continue.`;
     }
     return null;
@@ -104,7 +111,7 @@ export class Billing {
   }
 
   async launch(user: UserRow, req: LaunchPodRequest): Promise<CloudPod> {
-    const blocked = this.blocker(user, "gpu");
+    const blocked = await this.blocker(user, "gpu");
     if (blocked) throw new BillingError(blocked, 402);
     const gpuCount = Math.trunc(req.gpuCount);
     if (!(gpuCount >= 1 && gpuCount <= 8)) throw new BillingError("GPU count must be 1 to 8");
@@ -120,7 +127,7 @@ export class Billing {
     if (!offer) throw new BillingError("That GPU isn't offered in this cloud right now");
     const storage = this.storageRates(volumeGb, containerGb);
     const estimate = toMicro(offer.pricePerHour) * gpuCount + storage.running;
-    const balance = this.store.balanceMicro(user.id);
+    const balance = await this.store.balanceMicro(user.id);
     if (balance < estimate * this.cfg.minLaunchHours)
       throw new BillingError(`Not enough credits: this pod costs ${fromMicro(estimate).toFixed(2)} credits/hour and launching needs at least ${this.cfg.minLaunchHours} hour(s) of balance.`, 402);
 
@@ -157,7 +164,7 @@ export class Billing {
       last_billed_at: now,
       spent: 0,
     };
-    this.store.insertPod(row);
+    await this.store.insertPod(row);
     return this.view(row);
   }
 
@@ -180,66 +187,69 @@ export class Billing {
     };
   }
 
-  ownedPod(user: UserRow, id: string): PodRow {
-    const p = this.store.pod(id);
+  async ownedPod(user: UserRow, id: string): Promise<PodRow> {
+    const p = await this.store.pod(id);
     if (!p || p.user_id !== user.id) throw new BillingError("Pod not found", 404);
     return p;
   }
 
   async stop(user: UserRow, id: string): Promise<CloudPod> {
-    const p = this.ownedPod(user, id);
+    const p = await this.ownedPod(user, id);
     if (p.status === "terminated") throw new BillingError("Pod is terminated");
-    this.chargePod(p, Date.now());
+    await this.chargePod(p, Date.now());
     await this.runpod.stopPod(p.provider_id);
-    this.store.updatePod(p.id, { status: "stopped", status_reason: "Stopped by you", ssh_host: null, ssh_port: null });
-    return this.view(this.store.pod(p.id)!);
+    await this.store.updatePod(p.id, { status: "stopped", status_reason: "Stopped by you", ssh_host: null, ssh_port: null });
+    return this.view((await this.store.pod(p.id))!);
   }
 
   async start(user: UserRow, id: string): Promise<CloudPod> {
-    const p = this.ownedPod(user, id);
+    const p = await this.ownedPod(user, id);
     if (p.status !== "stopped") throw new BillingError("Only a stopped pod can be started");
-    const blocked = this.blocker(user, "gpu");
+    const blocked = await this.blocker(user, "gpu");
     if (blocked) throw new BillingError(blocked, 402);
-    this.chargePod(p, Date.now());
+    await this.chargePod(p, Date.now());
     await this.runpod.startPod(p.provider_id);
-    this.store.updatePod(p.id, { status: "starting", status_reason: null });
-    return this.view(this.store.pod(p.id)!);
+    await this.store.updatePod(p.id, { status: "starting", status_reason: null });
+    return this.view((await this.store.pod(p.id))!);
   }
 
   async terminate(user: UserRow, id: string): Promise<void> {
-    const p = this.ownedPod(user, id);
+    const p = await this.ownedPod(user, id);
     if (p.status === "terminated") return;
-    this.chargePod(p, Date.now());
+    await this.chargePod(p, Date.now());
     await this.runpod.deletePod(p.provider_id);
-    this.store.updatePod(p.id, { status: "terminated", status_reason: "Terminated by you", ssh_host: null, ssh_port: null });
+    await this.store.updatePod(p.id, { status: "terminated", status_reason: "Terminated by you", ssh_host: null, ssh_port: null });
   }
 
   /** Charges the pod for the time since it was last billed, at its current state's rate. */
-  private chargePod(p: PodRow, now: number): void {
-    const hours = Math.max(0, now - p.last_billed_at) / 3_600_000;
+  // Several instances (a user's request, the cron) may charge the same pod at once: the store
+  // only applies a charge whose starting point is still the pod's last_billed_at, so no interval
+  // is billed twice.
+  private async chargePod(p: PodRow, now: number): Promise<void> {
+    if (now <= p.last_billed_at) return;
+    const hours = (now - p.last_billed_at) / 3_600_000;
     const rate = p.status === "running" || p.status === "starting" ? p.rate_running : p.status === "stopped" ? p.rate_stopped : 0;
     const amount = Math.round(rate * hours);
-    this.store.tx(() => {
-      if (amount > 0) this.store.addEntry(p.user_id, p.status === "stopped" ? "storage" : "gpu", -amount, `${p.status === "stopped" ? "Storage" : "GPU"}: ${p.name} (${p.gpu_count}× ${p.gpu_name})`, p.id, now);
-      this.store.updatePod(p.id, { last_billed_at: now, spent: p.spent + amount });
-    });
+    const description = `${p.status === "stopped" ? "Storage" : "GPU"}: ${p.name} (${p.gpu_count}× ${p.gpu_name})`;
+    const entry = amount > 0 ? this.store.entry(p.user_id, p.status === "stopped" ? "storage" : "gpu", -amount, description, p.id, now) : null;
+    await this.store.charge(p.id, p.last_billed_at, now, amount, entry);
     p.last_billed_at = now;
     p.spent += amount;
   }
 
   /** One metering pass: refresh state from the provider, charge, and enforce balances and caps. */
   async meter(now = Date.now()): Promise<void> {
-    for (const p of this.store.livePods()) {
+    for (const p of await this.store.livePods()) {
       try {
         // Charge at the state the pod was in during the interval, then learn its new state.
-        this.chargePod(p, now);
+        await this.chargePod(p, now);
         await this.syncPod(p);
         if (p.status !== "running" && p.status !== "starting") continue;
-        const user = this.store.listUsers().find((u) => u.id === p.user_id);
-        const reason = user ? this.blocker(user, "gpu", now) : "Unknown user";
+        const user = await this.store.userById(p.user_id);
+        const reason = user ? await this.blocker(user, "gpu", now) : "Unknown user";
         if (reason) {
           await this.runpod.stopPod(p.provider_id);
-          this.store.updatePod(p.id, { status: "stopped", status_reason: reason, ssh_host: null, ssh_port: null });
+          await this.store.updatePod(p.id, { status: "stopped", status_reason: reason, ssh_host: null, ssh_port: null });
         }
       } catch (e) {
         console.error(`meter: pod ${p.id}:`, e instanceof Error ? e.message : e);
@@ -256,7 +266,7 @@ export class Billing {
     const ssh = remote ? sshOf(remote) : { ssh_host: null, ssh_port: null };
     if (status !== p.status || ssh.ssh_host !== p.ssh_host || ssh.ssh_port !== p.ssh_port) {
       const reason = status === "terminated" && p.status !== "terminated" ? (p.status_reason ?? "Terminated at the provider") : status === p.status ? p.status_reason : status === "stopped" ? (p.status_reason ?? "Stopped at the provider") : null;
-      this.store.updatePod(p.id, { status, status_reason: reason, ...ssh });
+      await this.store.updatePod(p.id, { status, status_reason: reason, ...ssh });
       p.status = status;
       p.status_reason = reason;
       p.ssh_host = ssh.ssh_host;
@@ -281,8 +291,8 @@ export class Billing {
       }));
   }
 
-  assertCanUseModels(user: UserRow): void {
-    const blocked = this.blocker(user, "models");
+  async assertCanUseModels(user: UserRow): Promise<void> {
+    const blocked = await this.blocker(user, "models");
     if (blocked) throw new BillingError(blocked, 402);
   }
 
@@ -290,7 +300,7 @@ export class Billing {
     const model = (await this.openrouter.models().catch(() => [] as OpenRouterModel[])).find((m) => m.id === modelId);
     const micro = this.usdToMicro(usageCostUsd(usage, model), this.cfg.modelMarkup);
     const u = (usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
-    if (micro > 0) this.store.addEntry(user.id, "model", -micro, `Model: ${modelId} (${u.prompt_tokens ?? 0} in / ${u.completion_tokens ?? 0} out tokens)`, generationId);
+    if (micro > 0) await this.store.addEntry(user.id, "model", -micro, `Model: ${modelId} (${u.prompt_tokens ?? 0} in / ${u.completion_tokens ?? 0} out tokens)`, generationId);
     return fromMicro(micro);
   }
 }

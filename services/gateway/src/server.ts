@@ -66,12 +66,19 @@ export interface GatewayDeps {
   openrouter: OpenRouter;
 }
 
-export function createGateway(deps: GatewayDeps): { server: Server; billing: Billing } {
+export interface Gateway {
+  /** Serves one request: the node:http listener, also used as the Vercel function. */
+  handle: (req: IncomingMessage, res: ServerResponse) => void;
+  server: Server;
+  billing: Billing;
+}
+
+export function createGateway(deps: GatewayDeps): Gateway {
   const { cfg, store, openrouter } = deps;
   const billing = new Billing(cfg, store, deps.runpod, openrouter);
 
-  const authUser = (req: IncomingMessage): UserRow => {
-    const user = store.userByToken(bearer(req));
+  const authUser = async (req: IncomingMessage): Promise<UserRow> => {
+    const user = await store.userByToken(bearer(req));
     if (!user) throw new HttpError(401, "Invalid or missing Converlt token");
     return user;
   };
@@ -80,7 +87,7 @@ export function createGateway(deps: GatewayDeps): { server: Server; billing: Bil
   };
 
   async function chat(req: IncomingMessage, res: ServerResponse, user: UserRow) {
-    billing.assertCanUseModels(user);
+    await billing.assertCanUseModels(user);
     const body = await readJson(req);
     const model = typeof body.model === "string" ? body.model : "";
     if (!model) throw new HttpError(400, "model is required");
@@ -144,59 +151,67 @@ export function createGateway(deps: GatewayDeps): { server: Server; billing: Bil
 
     if (p === "/health") return send(res, 200, { ok: true, gpu: deps.runpod.configured, models: openrouter.configured });
 
+    // One metering pass, for hosts without a long-running process (a Vercel cron calls this).
+    if (p === "/cron/meter") {
+      if (!cfg.cronSecret || !sameSecret(bearer(req), cfg.cronSecret)) throw new HttpError(401, "Cron secret required");
+      const started = Date.now();
+      await billing.meter(started);
+      return send(res, 200, { ok: true, ms: Date.now() - started });
+    }
+
     // -------------------------------------------------------- admin
     if (p.startsWith("/admin/")) {
       authAdmin(req);
       if (p === "/admin/users" && m === "GET")
-        return send(res, 200, store.listUsers().map((u) => ({ ...u, balance: store.balanceMicro(u.id) / 1e6 })));
+        return send(res, 200, await Promise.all((await store.listUsers()).map(async (u) => ({ ...u, balance: (await store.balanceMicro(u.id)) / 1e6 }))));
       if (p === "/admin/users" && m === "POST") {
         const b = await readJson(req);
         const email = String(b.email ?? "").trim();
         if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw new HttpError(400, "A valid email is required");
-        if (store.userByEmail(email)) throw new HttpError(409, "A user with that email exists");
-        const { user, token } = store.createUser(email, String(b.name ?? ""));
+        if (await store.userByEmail(email)) throw new HttpError(409, "A user with that email exists");
+        const { user, token } = await store.createUser(email, String(b.name ?? ""));
         const credits = Number(b.credits ?? 0);
-        if (credits > 0) store.addEntry(user.id, "grant", toMicro(credits), String(b.note ?? "Welcome credits"));
+        if (credits > 0) await store.addEntry(user.id, "grant", toMicro(credits), String(b.note ?? "Welcome credits"));
         return send(res, 201, { user, token });
       }
       if (p === "/admin/credits" && m === "POST") {
         const b = await readJson(req);
-        const user = store.userByEmail(String(b.email ?? ""));
+        const user = await store.userByEmail(String(b.email ?? ""));
         if (!user) throw new HttpError(404, "No such user");
         const credits = Number(b.credits);
         if (!Number.isFinite(credits) || credits === 0) throw new HttpError(400, "credits must be a non-zero number");
-        store.addEntry(user.id, credits > 0 ? "grant" : "adjust", toMicro(credits), String(b.note ?? (credits > 0 ? "Credits added" : "Adjustment")));
-        return send(res, 200, { balance: store.balanceMicro(user.id) / 1e6 });
+        await store.addEntry(user.id, credits > 0 ? "grant" : "adjust", toMicro(credits), String(b.note ?? (credits > 0 ? "Credits added" : "Adjustment")));
+        return send(res, 200, { balance: (await store.balanceMicro(user.id)) / 1e6 });
       }
       if (p === "/admin/rotate-token" && m === "POST") {
         const b = await readJson(req);
-        const user = store.userByEmail(String(b.email ?? ""));
+        const user = await store.userByEmail(String(b.email ?? ""));
         if (!user) throw new HttpError(404, "No such user");
-        return send(res, 200, { token: store.rotateToken(user.id) });
+        return send(res, 200, { token: await store.rotateToken(user.id) });
       }
       throw new HttpError(404, "Not found");
     }
 
     // -------------------------------------------------------- user
     if (!p.startsWith("/v1/")) throw new HttpError(404, "Not found");
-    const user = authUser(req);
+    const user = await authUser(req);
 
-    if (p === "/v1/me" && m === "GET") return send(res, 200, billing.wallet(user));
+    if (p === "/v1/me" && m === "GET") return send(res, 200, await billing.wallet(user));
     if (p === "/v1/me/limits" && m === "PUT") {
       const b = await readJson(req);
       const limits: SpendLimits = { gpuMonthly: capOrNull(b.gpuMonthly, "gpuMonthly"), modelsMonthly: capOrNull(b.modelsMonthly, "modelsMonthly") };
-      store.setLimits(user.id, limits);
-      return send(res, 200, billing.wallet({ ...user, gpu_monthly_cap: limits.gpuMonthly === null ? null : toMicro(limits.gpuMonthly), models_monthly_cap: limits.modelsMonthly === null ? null : toMicro(limits.modelsMonthly) }));
+      await store.setLimits(user.id, limits);
+      return send(res, 200, await billing.wallet({ ...user, gpu_monthly_cap: limits.gpuMonthly === null ? null : toMicro(limits.gpuMonthly), models_monthly_cap: limits.modelsMonthly === null ? null : toMicro(limits.modelsMonthly) }));
     }
-    if (p === "/v1/ledger" && m === "GET") return send(res, 200, store.ledger(user.id, Math.max(1, Math.min(500, Number(url.searchParams.get("limit") ?? 100) || 100))));
+    if (p === "/v1/ledger" && m === "GET") return send(res, 200, await store.ledger(user.id, Math.max(1, Math.min(500, Number(url.searchParams.get("limit") ?? 100) || 100))));
 
     if (p === "/v1/gpu/offers" && m === "GET") return send(res, 200, await billing.offers());
-    if (p === "/v1/gpu/pods" && m === "GET") return send(res, 200, store.userPods(user.id).map((x) => billing.view(x)));
+    if (p === "/v1/gpu/pods" && m === "GET") return send(res, 200, (await store.userPods(user.id)).map((x) => billing.view(x)));
     if (p === "/v1/gpu/pods" && m === "POST") return send(res, 201, await billing.launch(user, (await readJson(req)) as unknown as LaunchPodRequest));
     const podMatch = /^\/v1\/gpu\/pods\/([\w-]+)(\/stop|\/start)?$/.exec(p);
     if (podMatch) {
       const [, id, action] = podMatch;
-      if (m === "GET" && !action) return send(res, 200, billing.view(billing.ownedPod(user, id!)));
+      if (m === "GET" && !action) return send(res, 200, billing.view(await billing.ownedPod(user, id!)));
       if (m === "POST" && action === "/stop") return send(res, 200, await billing.stop(user, id!));
       if (m === "POST" && action === "/start") return send(res, 200, await billing.start(user, id!));
       if (m === "DELETE" && !action) {
@@ -215,7 +230,7 @@ export function createGateway(deps: GatewayDeps): { server: Server; billing: Bil
     throw new HttpError(404, "Not found");
   }
 
-  const server = createServer((req, res) => {
+  const handle = (req: IncomingMessage, res: ServerResponse) => {
     route(req, res).catch((e: unknown) => {
       const status = e instanceof HttpError || e instanceof BillingError ? e.status : e instanceof RunpodError ? (e.status >= 500 || e.status === 503 ? 502 : 400) : 500;
       if (status === 500) console.error(e);
@@ -223,6 +238,6 @@ export function createGateway(deps: GatewayDeps): { server: Server; billing: Bil
       if (res.headersSent) res.end();
       else send(res, status, { error: { message } });
     });
-  });
-  return { server, billing };
+  };
+  return { handle, server: createServer(handle), billing };
 }
