@@ -14,12 +14,4 @@ ide/vscode/
 ide/out/
 ide/VSCode-*/
 
-# Local Converlt Gateway data (ledger, logs)
-services/gateway/data/
-*.db
-*.db-wal
-*.db-shm
 *.log
-
-# Vercel build output of the gateway
-.vercel/

@@ -1,7 +1,6 @@
 packages:
   - ide/extensions/converge
   - packages/*
-  - services/gateway
 
 allowBuilds:
   esbuild: true

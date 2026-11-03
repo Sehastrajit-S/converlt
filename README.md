@@ -10,7 +10,13 @@ This is the MVP slice of the [product blueprint](docs/blueprint.md): remote GPU 
 
 Prerequisites: Node 22+, pnpm, `ssh` and `tar` on PATH (both ship with Windows 10+, macOS, and Linux). The GPU machine needs Linux, Python 3.8+, `bash`, and key-based SSH access (or WSL2 for a local GPU). Building the IDE also needs the toolchain listed in [ide/README.md](ide/README.md).
 
+The IDE bundles the gateway from the [Converlt-server](https://github.com/Sehastrajit-S/Converlt-server) repo, so check both out side by side (or set `CONVERLT_SERVER_DIR`):
+
 ```bash
+git clone https://github.com/Sehastrajit-S/converlt Converlt
+git clone https://github.com/Sehastrajit-S/Converlt-server
+(cd Converlt-server && pnpm install)
+cd Converlt
 pnpm install
 pnpm fetch        # once: portable Node, Code-OSS checkout, dependencies (~10 min)
 pnpm build        # packaged IDE -> ide/out/Converlt-win32-x64/Converlt.exe
@@ -46,7 +52,7 @@ Outside Converlt these calls are no-ops, so the script still runs normally.
 | **Run history** | Each run records an immutable manifest: command, parsed hyperparameters, git commit plus the uncommitted diff, machine, environment (Python, torch, CUDA, driver, `pip freeze`), checkpoints with SHA-256 hashes, and experiment notes (hypothesis → conclusion). |
 | **Compare** | Overlaid curves with smoothing, best-value table, config diff (differences first), and commit diff between runs. |
 | **Reproduce** | Re-launches with the same command and options. It warns when the commit, uncommitted changes, machine, data, or determinism differ. |
-| **Cloud GPUs and credits** | Launch RunPod GPUs from the IDE and pay from Converlt credits (100 credits = $1), billed by the [Converlt Gateway](services/gateway/README.md). Or choose Wallet → Use my own keys: paste a RunPod and/or OpenRouter API key and the gateway runs on this computer, keeps the keys in the OS keychain, and bills at cost against a budget you set. It keeps stopping pods when the budget runs out, even with the IDE closed. |
+| **Cloud GPUs and credits** | Launch RunPod GPUs from the IDE and pay from Converlt credits (100 credits = $1), billed by the [Converlt Gateway](https://github.com/Sehastrajit-S/Converlt-server). Or choose Wallet → Use my own keys: paste a RunPod and/or OpenRouter API key and the gateway runs on this computer, keeps the keys in the OS keychain, and bills at cost against a budget you set. It keeps stopping pods when the budget runs out, even with the IDE closed. |
 | **Assistant** | The chat panel is the Converlt assistant (OpenRouter models through the gateway, paid from credits). It can read and search the project, inspect runs and machines, and launch or stop runs. The same tools are available to Claude Code and Codex through the Converlt MCP server. |
 | **Datasets & models** | Search Hugging Face (models, datasets) and Kaggle (datasets, models) in the IDE and download straight onto a GPU machine as a background job: `/workspace/.converge/hub` on cloud pods (kept when the pod stops), `~/.converge/hub` elsewhere. Gated models and Kaggle need a token (stored in the OS keychain). The assistant knows the paths. |
 | **Cost** | Estimates for your own machines from a user-entered hourly rate, always labelled as estimates. |
@@ -61,7 +67,6 @@ packages/core/               Engine: ConvergeService, run manager, SSH/WSL trans
 packages/ui/                 React screens rendered in the IDE's webviews (runs, run detail, compare, compute)
 packages/run-protocol/       Shared types, run state machine, event reducer, config diff
 services/remote-agent/       converge_agent.py (stdlib-only Python, runs on the GPU machine)
-services/gateway/            Converlt Gateway: credits ledger, RunPod GPUs, OpenRouter models (local or Vercel)
 python/converge-runtime/     Optional SDK (converge.run / log / log_checkpoint)
 examples/                    smoke (no deps, simulates NaN/OOM/failures) and pytorch-cifar
 docs/                        blueprint.md, run-protocol.md
@@ -74,7 +79,7 @@ Run history is local-first: it lives in `<project>/.converge/` (git-ignored auto
 ```bash
 pnpm watch:extension    # rebuild the Converlt extension on change
 pnpm typecheck          # every package
-pnpm test               # protocol, core, gateway, and extension unit tests
+pnpm test               # protocol, core, and extension unit tests
 pnpm test:agent         # remote agent (Linux/WSL)
 
 # End-to-end through the production WSL transport: RunManager → sync → agent → tail → persist

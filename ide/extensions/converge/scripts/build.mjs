@@ -2,6 +2,7 @@
 // and stages the remote agent + SDK that get uploaded to GPU machines.
 //   node scripts/build.mjs [--watch]
 import { build, context } from "esbuild";
+import { existsSync } from "node:fs";
 import { cp, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,14 @@ const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(ext, "../../..");
 const dist = path.join(ext, "dist");
 const watch = process.argv.includes("--watch");
+
+// The gateway lives in the Converlt-server repo, checked out next to this one.
+const server = path.resolve(process.env.CONVERLT_SERVER_DIR ?? path.join(repo, "../Converlt-server"));
+const gatewayMain = path.join(server, "src/main.ts");
+if (!existsSync(gatewayMain)) {
+  console.error(`Converlt-server not found at ${server}. Clone it next to this repo and run pnpm install there, or set CONVERLT_SERVER_DIR.`);
+  process.exit(1);
+}
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(path.join(dist, "remote/agent"), { recursive: true });
@@ -32,7 +41,7 @@ const targets = [
   {
     ...common,
     // The Converlt Gateway, run on this computer in "use my own keys" mode.
-    entryPoints: { "gateway/main": path.join(repo, "services/gateway/src/main.ts") },
+    entryPoints: { "gateway/main": gatewayMain },
     outdir: dist,
     outExtension: { ".js": ".mjs" },
     platform: "node",

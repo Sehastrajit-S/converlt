@@ -1,4 +1,5 @@
-// Contract between the Converlt IDE and the Converlt Gateway (services/gateway).
+// Contract between the Converlt IDE and the Converlt Gateway (the Converlt-server repo, which keeps an
+// identical copy in src/api.ts: change both together).
 // The gateway holds the provider keys (RunPod, OpenRouter) and every user's credit ledger;
 // clients only ever hold a Converlt token. All money amounts here are in Converlt credits.
 
