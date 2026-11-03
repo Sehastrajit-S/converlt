@@ -8,7 +8,7 @@ set -euo pipefail
 mode="${1:-}"
 
 echo "==> Building the Converlt extension"
-(cd "$REPO_DIR/apps/vscode-extension" && node scripts/build.mjs)
+(cd "$IDE_DIR/extensions/converge" && node scripts/build.mjs)
 
 echo "==> Applying Converlt branding, patches and built-in extensions"
 node "$IDE_DIR/apply.mjs"

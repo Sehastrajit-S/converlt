@@ -1,6 +1,6 @@
 # Run protocol (v1)
 
-The contract between the desktop app and `converge_agent.py`. TypeScript types live in `packages/run-protocol/src/types.ts`.
+The contract between the Converlt IDE and `converge_agent.py`. TypeScript types live in `packages/run-protocol/src/types.ts`.
 
 ## Agent commands
 

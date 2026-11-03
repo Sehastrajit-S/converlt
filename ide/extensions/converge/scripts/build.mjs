@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ext = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const repo = path.resolve(ext, "../..");
+const repo = path.resolve(ext, "../../..");
 const dist = path.join(ext, "dist");
 const watch = process.argv.includes("--watch");
 

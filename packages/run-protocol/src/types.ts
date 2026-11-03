@@ -1,4 +1,4 @@
-// Shared contracts between the desktop app and the remote agent.
+// Shared contracts between the Converlt IDE and the remote agent.
 // The agent (Python) writes these events as JSON lines; see docs/run-protocol.md.
 
 export const PROTOCOL_VERSION = 1;

@@ -92,7 +92,7 @@ export function validateMachine(input: MachineInput): MachineInput {
   };
 }
 
-/** Everything Converlt does, independent of the UI shell (desktop app, VS Code extension, Converlt IDE). */
+/** Everything Converlt does, independent of the editor UI that hosts it. */
 export class ConvergeService {
   private readonly opts: ServiceOptions;
   private machines: Machine[];

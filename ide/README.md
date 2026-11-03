@@ -9,7 +9,7 @@ Converlt's own editor, built on Code-OSS (the MIT-licensed core of VS Code) the 
 | `overlays/` | Files copied over the tree: app icons, title-bar icon, editor watermark, and the Converlt workbench code (`src/vs/workbench/contrib/converlt/`). Regenerate the icons with `electron branding/make-icons.cjs`. |
 | `patches/*.patch` | Core source changes, applied in order with `git apply`. Keep them small; each must be rebased on upgrades. |
 | `extensions/converge-defaults/` | Converlt Dark/Light themes and default settings, shipped as a built-in extension |
-| `../apps/vscode-extension/` | The Converlt extension itself (runs, compute, diagnostics), shipped built-in. It also installs in stock VS Code. |
+| `extensions/converge/` | The Converlt extension itself (runs, compute, cloud, diagnostics, assistant), built and shipped built-in |
 | `apply.mjs` | Restores pristine upstream, then applies everything above. Idempotent. |
 | `fetch.sh` / `build.sh` | Toolchain + source + dependencies, then the build. |
 

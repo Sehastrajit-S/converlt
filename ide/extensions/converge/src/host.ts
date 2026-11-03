@@ -141,7 +141,7 @@ export class Host implements vscode.Disposable {
     await this.service.openProject(folder.uri.fsPath);
   }
 
-  /** RPC surface for webviews; same contract as the desktop shell's IPC. */
+  /** RPC surface for the webviews (see @converge/core/api). */
   readonly handlers: Record<InvokeMethod, (...args: any[]) => unknown> = {
     getState: async (): Promise<AppState> => ({
       version: String(this.ctx.extension.packageJSON.version),

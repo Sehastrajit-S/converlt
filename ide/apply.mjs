@@ -5,14 +5,13 @@
 //   3. patches/*.patch         -> git apply             (core code changes)
 //   4. built-in extensions     -> vscode/extensions/    (Converlt + defaults/theme)
 //
-//   node ide/apply.mjs        (expects apps/vscode-extension to be built)
+//   node ide/apply.mjs        (expects ide/extensions/converge to be built)
 import { execFileSync } from "node:child_process";
 import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ide = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.dirname(ide);
 const vscode = path.join(ide, "vscode");
 const git = (...args) => execFileSync("git", ["-C", vscode, ...args], { stdio: ["ignore", "pipe", "inherit"] }).toString();
 
@@ -59,7 +58,7 @@ for (const p of patches) {
 }
 
 // 4a. Converlt extension (prebuilt bundle; no dependencies to install).
-const extSrc = path.join(repo, "apps/vscode-extension");
+const extSrc = path.join(ide, "extensions/converge");
 const extDst = path.join(vscode, "extensions/converge");
 const extPkg = JSON.parse(await readFile(path.join(extSrc, "package.json"), "utf8"));
 delete extPkg.devDependencies;

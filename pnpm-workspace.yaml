@@ -1,12 +1,10 @@
 packages:
-  - apps/*
+  - ide/extensions/converge
   - packages/*
   - services/gateway
 
 allowBuilds:
-  electron: true
   esbuild: true
-  node-pty: true
 
 # Keep packages out of the repo root: the Code-OSS tree under ide/ resolves node_modules
 # upward, and a hoisted @types/vscode breaks its built-in extensions.
