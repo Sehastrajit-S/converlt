@@ -441,9 +441,10 @@ export class ConvergeService {
    * Starts signing in with a Converlt account: opens the gateway's login page in the browser.
    * Returns the code the page will show; then call cloudSignInWait.
    */
-  async cloudSignInStart(url: string = DEFAULT_CLOUD_URL): Promise<{ code: string; url: string; loginUrl: string }> {
+  async cloudSignInStart(url?: string | null): Promise<{ code: string; url: string; loginUrl: string }> {
     if (!this.opts.cloud) throw new Error("This shell can't store Converlt Cloud credentials");
-    const clean = gatewayUrl(url);
+    // Webview RPC turns a missing argument into null, so treat null and "" as "the hosted gateway".
+    const clean = gatewayUrl(url || DEFAULT_CLOUD_URL);
     this.signIn?.abort.abort();
     const s = { flow: startBrowserSignIn(clean), url: clean, abort: new AbortController() };
     this.signIn = s;
