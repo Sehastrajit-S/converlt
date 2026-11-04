@@ -42,6 +42,19 @@ export async function fingerprint(cwd: string): Promise<{ fp: GitFingerprint; pa
   return { fp: { commit, branch, dirty, diffStat, untracked }, patch: patch || null };
 }
 
+/** Files changed between two commits, or null if either commit isn't in this repository. */
+export async function changedFiles(cwd: string, from: string, to: string): Promise<string[] | null> {
+  if (!/^[0-9a-f]{7,40}$/i.test(from) || !/^[0-9a-f]{7,40}$/i.test(to)) return null;
+  const out = await git(cwd, ["diff", "--name-only", from, to]);
+  return out === null ? null : out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+}
+
+/** The diff of some files between two commits (for showing the hunks behind a likely cause). */
+export async function diffFiles(cwd: string, from: string, to: string, files: string[]): Promise<string> {
+  if (!/^[0-9a-f]{7,40}$/i.test(from) || !/^[0-9a-f]{7,40}$/i.test(to) || !files.length) return "";
+  return (await git(cwd, ["diff", from, to, "--", ...files])) ?? "";
+}
+
 export async function diffCommits(cwd: string, from: string, to: string): Promise<string> {
   if (!/^[0-9a-f]{7,40}$/i.test(from) || !/^[0-9a-f]{7,40}$/i.test(to)) throw new Error("invalid commit");
   return (await git(cwd, ["diff", from, to])) ?? "";

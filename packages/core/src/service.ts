@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Machine, RunNotes, RunStatus } from "@converge/run-protocol";
+import { explainRuns, patchByFile, type CodeChanges, type Machine, type RunExplanation, type RunNotes, type RunStatus } from "@converge/run-protocol";
+import { EXPLAIN_MODEL, explainPrompt } from "./explainPrompt.ts";
 import type {
   CloudPodView,
   EnvCreateSpec,
@@ -23,6 +24,7 @@ import type {
   ModelReply,
   ProbeResult,
   ProjectInfo,
+  RunView,
   Settings,
   TelemetryResult,
 } from "./api.ts";
@@ -36,7 +38,7 @@ import { installWatchdog } from "./watchdog.ts";
 
 export const DEFAULT_IDLE_STOP_MINUTES = 30;
 import { CLOUD_HUB_ROOT, HUB_ROOT, HubManager, hubDetails, hubSearch, type HubSecrets } from "./hub.ts";
-import { currentBranch, diffCommits, isGitRepo } from "./git.ts";
+import { changedFiles, currentBranch, diffCommits, diffFiles, isGitRepo } from "./git.ts";
 import { RunManager, type TransportFactory } from "./runManager.ts";
 import { explainSshError, parseWslHost, transportFor } from "./transport.ts";
 
@@ -290,6 +292,54 @@ export class ConvergeService {
 
   gitDiff(from: string, to: string) {
     return diffCommits(this.requireManager().projectPath, from, to);
+  }
+
+  /** The code that differs between two runs: files changed between their commits, and in their uncommitted patches. */
+  private async codeChanges(a: RunView, b: RunView): Promise<{ changes: CodeChanges; patches: [Map<string, string>, Map<string, string>] }> {
+    const mgr = this.requireManager();
+    const readPatch = async (v: RunView) => (v.hasPatch ? patchByFile(await fs.readFile(mgr.store.patchPath(v.manifest.runId), "utf8").catch(() => "")) : new Map<string, string>());
+    const patches: [Map<string, string>, Map<string, string>] = [await readPatch(a), await readPatch(b)];
+    const ca = a.manifest.git?.commit;
+    const cb = b.manifest.git?.commit;
+    let committedFiles: string[] = [];
+    let unknown = !ca || !cb;
+    if (ca && cb && ca !== cb) {
+      const files = await changedFiles(mgr.projectPath, ca, cb);
+      if (files === null) unknown = true;
+      else committedFiles = files;
+    }
+    const uncommittedFiles = [...new Set([...patches[0].keys(), ...patches[1].keys()])].filter((f) => patches[0].get(f) !== patches[1].get(f));
+    return { changes: { committedFiles, uncommittedFiles, unknown }, patches };
+  }
+
+  private runPair(baseRunId: string, otherRunId: string): [RunView, RunView] {
+    const a = this.getRun(baseRunId);
+    const b = this.getRun(otherRunId);
+    if (!a || !b) throw new Error("Run not found");
+    return [a, b];
+  }
+
+  async explainRuns(baseRunId: string, otherRunId: string): Promise<RunExplanation> {
+    const [a, b] = this.runPair(baseRunId, otherRunId);
+    return explainRuns(a, b, (await this.codeChanges(a, b)).changes);
+  }
+
+  async explainRunsWithAi(baseRunId: string, otherRunId: string, model = EXPLAIN_MODEL): Promise<ModelReply & { model: string }> {
+    const [a, b] = this.runPair(baseRunId, otherRunId);
+    const { changes, patches } = await this.codeChanges(a, b);
+    const x = explainRuns(a, b, changes);
+    // The code behind the likeliest code causes, so the model can point at actual lines.
+    const hot = x.causes.filter((c) => c.category === "code" && c.score >= 0.45).slice(0, 5).map((c) => c.subject);
+    let code = "";
+    const ca = a.manifest.git?.commit;
+    const cb = b.manifest.git?.commit;
+    if (ca && cb && ca !== cb) code += await diffFiles(this.requireManager().projectPath, ca, cb, hot.filter((f) => changes.committedFiles.includes(f)));
+    for (const f of hot) {
+      if (!changes.uncommittedFiles.includes(f)) continue;
+      code += `\n# Uncommitted change in ${a.manifest.name}:\n${patches[0].get(f) ?? "(none)"}\n# Uncommitted change in ${b.manifest.name}:\n${patches[1].get(f) ?? "(none)"}`;
+    }
+    const reply = await this.modelComplete(model, explainPrompt(a, b, x, code.slice(0, 16_000)));
+    return { ...reply, model };
   }
 
   patchPath(runId: string): string {

@@ -9,6 +9,7 @@ import type {
   RunNotes,
   RunOptions,
   RunStatus,
+  RunExplanation,
   RunSummary,
 } from "@converge/run-protocol";
 import type { CloudPod, CloudStatus, GpuOffer, LaunchPodRequest, LedgerEntry, ModelInfo, SpendLimits, WalletSummary } from "./cloudApi.ts";
@@ -301,6 +302,10 @@ export interface ConvergeApi {
   planReproduce(runId: string): Promise<ReproducePlan>;
   openPatch(runId: string): Promise<void>;
   gitDiff(fromCommit: string, toCommit: string): Promise<string>;
+  /** Why `otherRunId` turned out differently from `baseRunId`: the gap, where they split, and ranked causes. */
+  explainRuns(baseRunId: string, otherRunId: string): Promise<RunExplanation>;
+  /** The same, worded by an AI model through Converlt Cloud (costs credits). */
+  explainRunsWithAi(baseRunId: string, otherRunId: string): Promise<ModelReply & { model: string }>;
 
   updateSettings(patch: Partial<Settings>): Promise<Settings>;
 

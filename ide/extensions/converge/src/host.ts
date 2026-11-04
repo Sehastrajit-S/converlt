@@ -189,6 +189,8 @@ export class Host implements vscode.Disposable {
       await vscode.window.showTextDocument(doc, { preview: true });
     },
     gitDiff: (from, to) => this.service.gitDiff(from, to),
+    explainRuns: (a, b) => this.service.explainRuns(a, b),
+    explainRunsWithAi: (a, b) => this.service.explainRunsWithAi(a, b),
     updateSettings: (patch) => writeSettings(patch),
 
     listEnvs: (id) => this.service.listEnvs(id),

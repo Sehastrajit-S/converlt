@@ -5,6 +5,7 @@ import type { RunListItem, RunView } from "@converge/core/api";
 import { api, errorMessage } from "../api.ts";
 import { LineChart, SERIES_COLORS, smooth } from "../components/Chart.tsx";
 import { Dialog, Empty, StatusPill, useToast } from "../components/ui.tsx";
+import { WhyCard } from "../components/WhyCard.tsx";
 import { formatDuration, formatMiB, formatNumber, formatUsd, formatValue, shortCommit } from "../format.ts";
 
 export function Compare({ runs, ids, onChange, onOpen }: { runs: RunListItem[]; ids: string[]; onChange: (ids: string[]) => void; onOpen: (id: string) => void }) {
@@ -165,6 +166,8 @@ export function Compare({ runs, ids, onChange, onOpen }: { runs: RunListItem[]; 
               Metric columns show the best value (min for loss-like metrics, max otherwise).
             </div>
           )}
+
+          {views.length >= 2 && <WhyCard views={views} />}
 
           {metricKeys.length > 0 && (
             <>
