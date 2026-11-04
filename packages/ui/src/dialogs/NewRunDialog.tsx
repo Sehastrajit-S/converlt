@@ -3,6 +3,7 @@ import { CircleCheck, CircleX, Cpu, LoaderCircle, Play, Rocket, TriangleAlert } 
 import { parseCliHyperparameters, type RunOptions } from "@converge/run-protocol";
 import type { AppState, SyncPlanView } from "@converge/core/api";
 import { api, errorMessage } from "../api.ts";
+import { EnvIssues } from "../components/EnvIssues.tsx";
 import { Dialog, Switch } from "../components/ui.tsx";
 import { formatBytes, formatMiB, formatValue } from "../format.ts";
 
@@ -25,7 +26,19 @@ function storageKey(project: string) {
   return `converge:lastCommand:${project}`;
 }
 
-export function NewRunDialog({ state, prefill, onClose, onLaunched }: { state: AppState; prefill?: NewRunPrefill; onClose: () => void; onLaunched: (runId: string) => void }) {
+export function NewRunDialog({
+  state,
+  prefill,
+  onClose,
+  onLaunched,
+  onSetupAlerts,
+}: {
+  state: AppState;
+  prefill?: NewRunPrefill;
+  onClose: () => void;
+  onLaunched: (runId: string) => void;
+  onSetupAlerts?: () => void;
+}) {
   const project = state.project!;
   const initialCommand = prefill?.command ?? (() => {
     try {
@@ -57,6 +70,8 @@ export function NewRunDialog({ state, prefill, onClose, onLaunched }: { state: A
   }, [launching, onLaunched]);
 
   const hp = useMemo(() => parseCliHyperparameters(command), [command]);
+  const selected = state.machines.find((m) => m.id === machineId) ?? null;
+  const alertsUrl = state.settings.defaultOptions.notifyUrl;
 
   const launch = async () => {
     if (!machineId || !command.trim()) return;
@@ -178,6 +193,7 @@ export function NewRunDialog({ state, prefill, onClose, onLaunched }: { state: A
             })}
           </div>
         )}
+        {selected && <EnvIssues machine={selected} probe={state.probes[selected.id]} />}
       </div>
 
       <div className="field">
@@ -206,6 +222,21 @@ export function NewRunDialog({ state, prefill, onClose, onLaunched }: { state: A
               <div className="hint">Stop the run as soon as a non-finite metric is logged.</div>
             </div>
             <Switch on={options.stopOnNan} onChange={(v) => setOptions({ ...options, stopOnNan: v })} label="Stop on NaN" />
+          </div>
+          <div className="option-row">
+            <div className="text">
+              <div className="title">Phone alert</div>
+              <div className="hint">{alertsUrl ? "Message your phone when the run ends, fails, hits NaN or stalls." : "Get a message on your phone when the run ends or fails."}</div>
+            </div>
+            {alertsUrl ? (
+              <Switch on={!!options.notifyUrl} onChange={(v) => setOptions({ ...options, notifyUrl: v ? alertsUrl : undefined })} label="Phone alert" />
+            ) : (
+              onSetupAlerts && (
+                <button className="btn sm" onClick={onSetupAlerts}>
+                  Set up
+                </button>
+              )
+            )}
           </div>
           <div className="option-row">
             <div className="text">

@@ -210,6 +210,12 @@
         "icon": "$(dashboard)"
       },
       {
+        "command": "converge.setupPhoneAlerts",
+        "title": "Set Up Phone Alerts",
+        "category": "Converlt",
+        "icon": "$(bell)"
+      },
+      {
         "command": "converge.openHub",
         "title": "Datasets & Models",
         "category": "Converlt",
@@ -411,6 +417,11 @@
           "default": 20,
           "minimum": 1,
           "description": "Seconds between SIGTERM and SIGKILL when stopping a run."
+        },
+        "converge.runs.phoneAlertsUrl": {
+          "type": "string",
+          "default": "",
+          "description": "ntfy topic URL for phone alerts, e.g. https://ntfy.sh/converlt-…. The GPU machine posts there when a run finishes, fails, hits NaN or stalls, even with the editor closed. Set it up under Converlt → Settings → Phone alerts."
         },
         "converge.notifications": {
           "type": "boolean",

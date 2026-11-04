@@ -3,6 +3,7 @@ import { CircleCheck, CircleX, HardDrive, LoaderCircle, Pencil, Plus, RefreshCw,
 import type { Machine } from "@converge/run-protocol";
 import type { AppState, ProbeResult, TelemetryResult } from "@converge/core/api";
 import { api, errorMessage } from "../api.ts";
+import { EnvIssues } from "../components/EnvIssues.tsx";
 import { Empty, Meter, useToast } from "../components/ui.tsx";
 import { formatMiB, timeAgo } from "../format.ts";
 
@@ -153,6 +154,11 @@ function MachineCard({ machine, probe, onEdit }: { machine: Machine; probe?: Pro
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {probe?.ok && (
+        <div style={{ marginTop: 10 }}>
+          <EnvIssues machine={machine} probe={probe} />
         </div>
       )}
 

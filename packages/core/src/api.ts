@@ -29,7 +29,19 @@ export interface ProbeResult {
   gpus?: GpuSample[];
   driver?: string | null;
   cudaVersion?: string | null;
-  python?: { python?: string | null; pythonPath?: string | null; torch?: string | null; torchCuda?: string | null; cudaAvailable?: boolean };
+  python?: {
+    python?: string | null;
+    pythonPath?: string | null;
+    torch?: string | null;
+    torchCuda?: string | null;
+    cudaAvailable?: boolean;
+    torchArchList?: string[];
+    gpuCapability?: string;
+    /** Installed packages built against torch, e.g. ["torchvision"]. */
+    companions?: string[];
+  };
+  /** Compute capability of GPU 0, e.g. "8.9". */
+  gpuCapability?: string | null;
   host?: HostSample;
   workdir?: string;
   checks?: ProbeCheck[];
@@ -308,6 +320,8 @@ export interface ConvergeApi {
   explainRunsWithAi(baseRunId: string, otherRunId: string): Promise<ModelReply & { model: string }>;
 
   updateSettings(patch: Partial<Settings>): Promise<Settings>;
+  /** Sends a test message to an ntfy topic URL, from this computer. */
+  testPhoneAlert(url: string): Promise<void>;
 
   // Environments on a machine.
   listEnvs(machineId: string): Promise<EnvList>;
@@ -346,7 +360,7 @@ export interface ConvergeApi {
   /** Also keeps a Converlt machine in sync with each pod's SSH endpoint. */
   gpuPods(): Promise<CloudPodView[]>;
   /** `idleStopMinutes`: the pod stops itself after that long without GPU work (default 30, 0 = never). */
-  gpuLaunch(req: Omit<LaunchPodRequest, "publicKey"> & { idleStopMinutes?: number }): Promise<CloudPodView>;
+  gpuLaunch(req: Omit<LaunchPodRequest, "publicKey"> & { idleStopMinutes?: number; thenRun?: { command: string; options: RunOptions; reproducedFrom?: string } }): Promise<CloudPodView>;
   gpuStop(podId: string): Promise<void>;
   gpuStart(podId: string): Promise<void>;
   gpuTerminate(podId: string): Promise<void>;

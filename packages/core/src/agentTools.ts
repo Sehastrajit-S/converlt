@@ -1,6 +1,8 @@
 // Converlt tools for AI agents: the editor's own assistant and outside agents (Claude Code,
 // Codex) through the Converlt MCP server. Definitions are plain data (the MCP server needs them
 // without the service); `runAgentTool` executes them against a live ConvergeService.
+import { forecastRun } from "@converge/run-protocol";
+import type { RunView } from "./api.ts";
 import type { ConvergeService } from "./service.ts";
 
 export interface AgentToolDef {
@@ -64,6 +66,12 @@ export type ApproveFn = (title: string, detail: string) => Promise<boolean>;
 
 const MAX = 60_000;
 
+/** When a running run will finish, if its length is known. */
+function forecastFor(v: RunView) {
+  const f = v.status === "running" ? forecastRun(v.summary, v.effectiveConfig, Date.now() / 1000) : null;
+  return f && { step: f.currentStep, totalSteps: f.totalSteps, stepsPerSec: Number(f.stepsPerSec.toPrecision(3)), remainingMinutes: Math.round(f.remainingSec / 60), lengthFrom: f.totalSource };
+}
+
 export interface ToolContext {
   service: ConvergeService;
   approve: ApproveFn;
@@ -108,6 +116,8 @@ export async function runAgentTool(name: string, input: Record<string, unknown>,
           peakGpuMemMiB: sum.peakGpuMemMiB,
           metrics,
           diagnostics: sum.diagnostics.map((d) => ({ kind: d.kind, severity: d.severity, message: d.message, step: d.step, data: d.data })),
+          forecast: forecastFor(v),
+          inputs: sum.inputs.map((i) => ({ kind: i.kind, name: i.name, fingerprint: i.fingerprint ?? null, revision: i.revision ?? null })),
           env: sum.env,
           lastLogLines: sum.logs.slice(-80).map((l) => (l.stream === "stderr" ? `[stderr] ${l.line}` : l.line)),
         },

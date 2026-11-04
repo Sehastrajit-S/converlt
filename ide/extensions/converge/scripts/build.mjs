@@ -24,7 +24,10 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(path.join(dist, "remote/agent"), { recursive: true });
 await mkdir(path.join(dist, "remote/sdk/converge"), { recursive: true });
 await cp(path.join(repo, "services/remote-agent/converge_agent.py"), path.join(dist, "remote/agent/converge_agent.py"));
-await cp(path.join(repo, "python/converge-runtime/converge/__init__.py"), path.join(dist, "remote/sdk/converge/__init__.py"));
+// The SDK package plus sitecustomize.py, which installs the zero-setup hooks for Converlt runs.
+for (const f of ["__init__.py", "_inputs.py", "_autohook.py"])
+  await cp(path.join(repo, "python/converge-runtime/converge", f), path.join(dist, "remote/sdk/converge", f));
+await cp(path.join(repo, "python/converge-runtime/sitecustomize.py"), path.join(dist, "remote/sdk/sitecustomize.py"));
 
 const common = { bundle: true, sourcemap: true, logLevel: "info", minify: !watch };
 const targets = [

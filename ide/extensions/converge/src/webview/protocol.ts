@@ -1,4 +1,5 @@
 // Messages between webview panels and the extension host.
+import type { GpuPreselect } from "@converge/ui";
 
 export type Route =
   | { view: "dashboard" }
@@ -7,7 +8,8 @@ export type Route =
   | { view: "compare"; runIds: string[] }
   | { view: "compute" }
   | { view: "wallet" }
-  | { view: "gpus" }
+  | { view: "gpus"; preselect?: GpuPreselect | null }
+  | { view: "alerts" }
   | { view: "models" }
   | { view: "envs"; machineId?: string | null }
   | { view: "hub"; machineId?: string | null };
@@ -21,7 +23,8 @@ export type HostCommand =
   | { name: "showCode" }
   | { name: "openProject"; path: string }
   | { name: "openWallet" }
-  | { name: "openGpus" }
+  | { name: "openGpus"; preselect?: GpuPreselect | null }
+  | { name: "openAlerts" }
   | { name: "openModels" }
   | { name: "openEnvironments"; machineId?: string | null }
   | { name: "openHub"; machineId?: string | null }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { explainRuns, patchByFile, type CodeChanges, type Machine, type RunExplanation, type RunNotes, type RunStatus } from "@converge/run-protocol";
+import { explainRuns, patchByFile, type CodeChanges, type Machine, type RunExplanation, type RunNotes, type RunOptions, type RunStatus } from "@converge/run-protocol";
 import { EXPLAIN_MODEL, explainPrompt } from "./explainPrompt.ts";
 import type {
   CloudPodView,
@@ -35,12 +35,20 @@ import type { LocalGateway } from "./localGateway.ts";
 import { agentsStatus, connectAgents, type McpLaunch } from "./agents.ts";
 import { checkPython, CLOUD_ENV_ROOT, ENV_ROOT, EnvManager } from "./envs.ts";
 import { installWatchdog } from "./watchdog.ts";
+import { publishNtfy } from "./phoneAlerts.ts";
 
 export const DEFAULT_IDLE_STOP_MINUTES = 30;
 import { CLOUD_HUB_ROOT, HUB_ROOT, HubManager, hubDetails, hubSearch, type HubSecrets } from "./hub.ts";
 import { changedFiles, currentBranch, diffCommits, diffFiles, isGitRepo } from "./git.ts";
 import { RunManager, type TransportFactory } from "./runManager.ts";
 import { explainSshError, parseWslHost, transportFor } from "./transport.ts";
+
+/** A run to start on a pod once it's up. */
+export interface PendingRun {
+  command: string;
+  options: RunOptions;
+  reproducedFrom?: string;
+}
 
 /** Persistence for registered machines; each shell supplies its own (JSON file, VS Code globalState, ...). */
 export interface MachineStore {
@@ -116,6 +124,8 @@ export class ConvergeService {
   manager: RunManager | null = null;
   /** Idle-stop choice for pods launched in this session, until their machine exists. */
   private readonly pendingIdle = new Map<string, number>();
+  /** Runs to start on a pod as soon as it's reachable ("rent this GPU and run there"), by pod id. */
+  private readonly pendingRuns = new Map<string, PendingRun & { tries: number }>();
 
   constructor(opts: ServiceOptions) {
     this.opts = opts;
@@ -322,6 +332,10 @@ export class ConvergeService {
   async explainRuns(baseRunId: string, otherRunId: string): Promise<RunExplanation> {
     const [a, b] = this.runPair(baseRunId, otherRunId);
     return explainRuns(a, b, (await this.codeChanges(a, b)).changes);
+  }
+
+  testPhoneAlert(url: string): Promise<void> {
+    return publishNtfy(url, "Converlt phone alerts work", "You'll get a message here when a run finishes, fails, hits a NaN loss or stalls, even with the editor closed.", ["white_check_mark"]);
   }
 
   async explainRunsWithAi(baseRunId: string, otherRunId: string, model = EXPLAIN_MODEL): Promise<ModelReply & { model: string }> {
@@ -548,13 +562,41 @@ export class ConvergeService {
     return this.syncPodMachines(pods);
   }
 
-  async gpuLaunch(req: Omit<LaunchPodRequest, "publicKey"> & { idleStopMinutes?: number }): Promise<CloudPodView> {
+  async gpuLaunch(req: Omit<LaunchPodRequest, "publicKey"> & { idleStopMinutes?: number; thenRun?: PendingRun }): Promise<CloudPodView> {
     const key = await ensureCloudKey();
-    const { idleStopMinutes, ...launch } = req;
+    const { idleStopMinutes, thenRun, ...launch } = req;
+    if (thenRun && !this.manager) throw new Error("Open the project folder first, so the run has code to sync.");
     const pod = await (await this.cloudClient()).launch({ ...launch, publicKey: key.publicKey });
     this.pendingIdle.set(pod.id, idleStopMinutes ?? DEFAULT_IDLE_STOP_MINUTES);
+    if (thenRun) this.pendingRuns.set(pod.id, { ...thenRun, tries: 0 });
     const [view] = await this.syncPodMachines([pod], false);
     return view!;
+  }
+
+  /**
+   * Starts the run waiting for this machine's pod once the readiness probe reaches it. A new pod's
+   * sshd can take a minute, so failed probes are retried for a few minutes before giving up.
+   */
+  private async startPendingRun(machineId: string, probe: ProbeResult): Promise<void> {
+    const m = this.machines.find((x) => x.id === machineId);
+    const pending = m?.cloudPodId ? this.pendingRuns.get(m.cloudPodId) : undefined;
+    if (!m?.cloudPodId || !pending) return;
+    if (!probe.ok) {
+      if (++pending.tries > 12) {
+        this.pendingRuns.delete(m.cloudPodId);
+        this.opts.hooks.runFinished(m.name, "failed", `Couldn't reach ${m.name} to start the run: ${probe.error ?? "no connection"}. Start it from the GPUs page.`);
+        return;
+      }
+      setTimeout(() => void this.probeMachine(machineId).then((r) => this.startPendingRun(machineId, r)).catch(() => {}), 20_000);
+      return;
+    }
+    this.pendingRuns.delete(m.cloudPodId);
+    if (!this.manager) return;
+    try {
+      await this.launchRun({ machineId, command: pending.command, options: pending.options, reproducedFrom: pending.reproducedFrom });
+    } catch (e) {
+      this.opts.hooks.runFinished(m.name, "failed", `Couldn't start the run on ${m.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   async gpuStop(podId: string): Promise<void> {
@@ -661,12 +703,19 @@ export class ConvergeService {
             identityFile: key.privateKey,
             python: "python3",
             cloudPodId: pod.id,
+            cloudPricePerHour: pod.pricePerHour,
             idleStopMinutes: this.pendingIdle.get(pod.id) ?? DEFAULT_IDLE_STOP_MINUTES,
           };
           this.machines = [...this.machines, m];
           fresh.push(m.id);
           changed = true;
-        } else if (m.host !== host || m.port !== pod.ssh.port) {
+        } else if (m.cloudPricePerHour !== pod.pricePerHour && pod.status === "running") {
+          const priced: Machine = { ...m, cloudPricePerHour: pod.pricePerHour };
+          this.machines = this.machines.map((x) => (x.id === priced.id ? priced : x));
+          m = priced;
+          changed = true;
+        }
+        if (m.host !== host || m.port !== pod.ssh.port) {
           const moved: Machine = { ...m, host, port: pod.ssh.port, identityFile: key.privateKey };
           this.machines = this.machines.map((x) => (x.id === moved.id ? moved : x));
           delete this.probes[moved.id];
@@ -688,7 +737,7 @@ export class ConvergeService {
     }
     if (changed) await this.persist();
     // Install the agent and check readiness in the background as soon as a pod is reachable.
-    for (const id of fresh) void this.probeMachine(id).catch(() => {});
+    for (const id of fresh) void this.probeMachine(id).then((r) => this.startPendingRun(id, r)).catch(() => {});
     return views;
   }
 }

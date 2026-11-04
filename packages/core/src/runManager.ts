@@ -317,6 +317,8 @@ export class RunManager {
       identityFile: machine.identityFile,
       python: machine.python,
       hourlyRate: machine.hourlyRate,
+      cloudPodId: machine.cloudPodId,
+      cloudPricePerHour: machine.cloudPricePerHour,
     };
     const manifest: RunManifest = {
       schemaVersion: PROTOCOL_VERSION,
@@ -362,6 +364,7 @@ export class RunManager {
         progress("start", "Starting training");
         await client.start({
           runId,
+          name: manifest.name,
           project: manifest.project,
           command: manifest.command,
           workdir: manifest.workdir,
@@ -420,7 +423,11 @@ export class RunManager {
     if (!m.git) warnings.push("The original run was not in a git repository, so its exact code version is unknown.");
     const machine = machines.find((x) => x.id === m.machine.id) ?? null;
     if (!machine) warnings.push(`The original machine (${m.machine.name}) is no longer registered. Pick another machine; results may differ on different hardware.`);
-    warnings.push("Dataset contents are not versioned by Converlt. If the data changed, results may differ.");
+    const datasets = r.summary.inputs.filter((i) => i.kind === "dataset" && i.fingerprint);
+    if (datasets.length)
+      warnings.push(`The original run's data is fingerprinted (${datasets.map((d) => d.name).join(", ")}). Compare the reproduction with it afterwards: a data change shows up as a cause.`);
+    else
+      warnings.push("The original run recorded no dataset fingerprint, so a data change wouldn't be noticed. Hugging Face load_dataset is recorded automatically; for local data, call run.log_dataset(path).");
     warnings.push("GPU kernels and data loading may be nondeterministic unless the script seeds and enables deterministic algorithms.");
     return { command: m.command, machineId: machine?.id ?? null, options: m.options, warnings };
   }

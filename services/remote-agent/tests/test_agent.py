@@ -193,6 +193,131 @@ class AgentTest(unittest.TestCase):
         names = [c["name"] for c in info["checks"]]
         self.assertIn("PyTorch", names)
         self.assertTrue(info["python"]["python"])
+        self.assertIn("companions", info["python"])
+        self.assertIn("gpuCapability", info)
+
+    # ------------------------------------------------------------------ SDK records
+
+    def script(self, name, body):
+        with open(os.path.join(self.workdir, name), "w") as f:
+            f.write(body)
+        return "%s %s" % (sys.executable, name)
+
+    SDK_WRITE = "import json, os, time\nf = open(os.environ['CONVERGE_SDK_FILE'], 'a')\ndef w(r):\n    f.write(json.dumps(r) + '\\n'); f.flush()\n"
+
+    def test_nan_detail_is_merged_into_the_nan_card(self):
+        cmd = self.script(
+            "nan.py",
+            self.SDK_WRITE
+            + "w({'type': 'metric', 'step': 1, 'values': {'train/loss': 0.5}})\n"
+            + "w({'type': 'nan_detail', 'data': {'nanWhere': 'gradients', 'nanLayer': 'decoder.3', 'nanVerdict': 'backward overflowed'}})\n"
+            + "w({'type': 'metric', 'step': 2, 'values': {'train/loss': 'NaN'}})\n"
+            + "time.sleep(0.5)\n",
+        )
+        run_id = self.start(cmd)
+        self.wait_status(run_id, ("completed", "failed"))
+        nan = [e for e in self.events(run_id) if e["type"] == "diagnostic" and e["kind"] == "nan"]
+        self.assertEqual(len(nan), 1, nan)
+        self.assertEqual(nan[0]["data"]["nanLayer"], "decoder.3")
+        self.assertEqual(nan[0]["step"], 2)
+
+    def test_input_records_become_events(self):
+        cmd = self.script(
+            "inputs.py",
+            self.SDK_WRITE
+            + "w({'type': 'input', 'kind': 'dataset', 'name': 'imdb', 'fingerprint': 'abc', 'source': 'auto', 'junk': 1})\n"
+            + "w({'type': 'input', 'kind': 'bogus', 'name': 'x'})\n",
+        )
+        run_id = self.start(cmd)
+        self.wait_status(run_id, ("completed",))
+        inputs = [e for e in self.events(run_id) if e["type"] == "input"]
+        self.assertEqual(len(inputs), 1, inputs)
+        self.assertEqual((inputs[0]["name"], inputs[0]["fingerprint"]), ("imdb", "abc"))
+        self.assertNotIn("junk", inputs[0])
+
+    def test_slow_data_loader_is_named(self):
+        self.env["CONVERGE_DIAG_WARMUP_SEC"] = "0"
+        cmd = self.script(
+            "slow.py",
+            self.SDK_WRITE
+            + "for i in range(3):\n"
+            + "    w({'type': 'perf', 'wallSec': 30.0, 'dataWaitSec': 21.0, 'batches': 50, 'numWorkers': 0, 'pinMemory': False, 'batchSize': 32})\n"
+            + "time.sleep(1)\n",
+        )
+        run_id = self.start(cmd)
+        self.wait_status(run_id, ("completed",))
+        diag = [e for e in self.events(run_id) if e["type"] == "diagnostic" and e["kind"] == "dataloader"]
+        self.assertEqual(len(diag), 1, diag)
+        self.assertIn("70% of training time", diag[0]["message"])
+        self.assertIn("num_workers=0", diag[0]["message"])
+        self.assertGreaterEqual(diag[0]["data"]["suggestedWorkers"], 2)
+
+    # ------------------------------------------------------------------ phone alerts
+
+    def ntfy_server(self):
+        """A local stand-in for ntfy: records each published message."""
+        import http.server
+        import threading
+
+        got = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                got.append(json.loads(body))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return "http://127.0.0.1:%d/converlt-test" % srv.server_port, got
+
+    def wait_for(self, items, n, timeout=10):
+        deadline = time.time() + timeout
+        while len(items) < n and time.time() < deadline:
+            time.sleep(0.1)
+        return items
+
+    def test_phone_alert_when_a_run_fails(self):
+        url, got = self.ntfy_server()
+        run_id = "t" + uuid.uuid4().hex[:10]
+        manifest = {
+            "runId": run_id, "name": "run-042", "project": "test", "workdir": self.workdir, "python": sys.executable, "env": {},
+            "command": "%s train.py --steps 100 --sleep 0 --oom-at 5" % sys.executable,
+            "options": {"stopOnNan": False, "telemetryIntervalSec": 2, "stallMinutes": 0, "cancelGraceSec": 2, "notifyUrl": url},
+        }
+        rc, out = self.agent("start", stdin=json.dumps(manifest))
+        self.assertEqual(rc, 0, out)
+        self.wait_status(run_id, ("failed",))
+        self.wait_for(got, 1)
+        self.assertEqual(len(got), 1, got)
+        self.assertEqual(got[0]["topic"], "converlt-test")
+        self.assertEqual(got[0]["title"], "run-042 failed")
+        self.assertIn("CUDA out of memory", got[0]["message"])
+        self.assertIn("at step", got[0]["message"])
+        self.assertEqual(got[0]["priority"], 4)
+
+    def test_phone_alert_when_a_run_completes_and_none_when_cancelled(self):
+        url, got = self.ntfy_server()
+        run_id = self.start("%s train.py --steps 10 --sleep 0" % sys.executable, notifyUrl=url)
+        self.wait_status(run_id, ("completed",))
+        self.wait_for(got, 1)
+        self.assertEqual(len(got), 1, got)
+        self.assertIn("finished", got[0]["title"])
+        self.assertRegex(got[0]["message"], r"train/loss [\d.e-]+ at step 9\.")
+
+        run_id = self.start("%s train.py --steps 100000 --sleep 0.05" % sys.executable, notifyUrl=url)
+        self.wait_status(run_id, ("running",))
+        self.agent("cancel", run_id)
+        self.wait_status(run_id, ("cancelled",))
+        time.sleep(1)
+        self.assertEqual(len(got), 1, "you stopped it yourself: no alert")
 
 
 if __name__ == "__main__":

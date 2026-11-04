@@ -6,7 +6,7 @@ import { api, errorMessage } from "../api.ts";
 import { formatNumber } from "../format.ts";
 
 const LIKELIHOOD_TAG = { high: "err", medium: "warn", low: "" } as const;
-const CATEGORY_LABEL: Record<Cause["category"], string> = { config: "Config", code: "Code", environment: "Environment", hardware: "Hardware", length: "Run length" };
+const CATEGORY_LABEL: Record<Cause["category"], string> = { config: "Config", code: "Code", data: "Data", environment: "Environment", hardware: "Hardware", length: "Run length" };
 const COLLAPSED = 6;
 
 function headline(x: RunExplanation, a: string, b: string): string {

@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@converge/core": "workspace:*",
-    "@converge/run-protocol": "workspace:*"
+    "@converge/run-protocol": "workspace:*",
+    "qrcode-generator": "1.4.4"
   },
   "peerDependencies": {
     "lucide-react": "*",

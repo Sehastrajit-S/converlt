@@ -22,7 +22,7 @@ export interface CodeChanges {
   unknown: boolean;
 }
 
-export type CauseCategory = "config" | "code" | "environment" | "hardware" | "length";
+export type CauseCategory = "config" | "code" | "data" | "environment" | "hardware" | "length";
 export type Likelihood = "high" | "medium" | "low";
 
 export interface Cause {
@@ -282,6 +282,46 @@ function hardwareCauses(a: ExplainInput, b: ExplainInput): Cause[] {
   return out;
 }
 
+const short = (s: string | null | undefined) => (s ? (s.length > 12 ? s.slice(0, 12) : s) : "");
+
+/** Datasets and pretrained weights whose fingerprint or revision differs, or that only one run used. */
+function inputCauses(a: RunSummary["inputs"], b: RunSummary["inputs"]): Cause[] {
+  const out: Cause[] = [];
+  const key = (i: RunSummary["inputs"][number]) => `${i.kind}:${i.name}`;
+  const mb = new Map(b.map((i) => [key(i), i]));
+  const ma = new Map(a.map((i) => [key(i), i]));
+  const label = (k: "dataset" | "weights") => (k === "dataset" ? "Dataset" : "Pretrained weights");
+  for (const [k, ia] of ma) {
+    const ib = mb.get(k);
+    if (!ib) continue;
+    const va = ia.fingerprint ?? ia.revision;
+    const vb = ib.fingerprint ?? ib.revision;
+    if (!va || !vb || va === vb) continue;
+    const dataset = ia.kind === "dataset";
+    out.push({
+      category: "data",
+      subject: `${label(ia.kind)} ${ia.name}`,
+      from: short(va),
+      to: short(vb),
+      score: dataset ? 0.75 : 0.65,
+      likelihood: likelihood(dataset ? 0.75 : 0.65),
+      reason: dataset
+        ? `The ${ia.name} data itself changed between the runs${ia.files != null && ib.files != null && ia.files !== ib.files ? ` (${ia.files} → ${ib.files} files)` : ""}. Different data often moves results more than any setting.`
+        : `The runs started from different versions of ${ia.name}.`,
+    });
+  }
+  // Inputs only one run recorded: swapped datasets or base models show up here.
+  const onlyA = [...ma.keys()].filter((k) => !mb.has(k));
+  const onlyB = [...mb.keys()].filter((k) => !ma.has(k));
+  for (const kind of ["dataset", "weights"] as const) {
+    const fa = onlyA.filter((k) => k.startsWith(`${kind}:`)).map((k) => ma.get(k)!.name);
+    const fb = onlyB.filter((k) => k.startsWith(`${kind}:`)).map((k) => mb.get(k)!.name);
+    if (fa.length && fb.length)
+      out.push({ category: "data", subject: label(kind), from: fa.join(", "), to: fb.join(", "), score: 0.8, likelihood: "high", reason: `The runs used different ${kind === "dataset" ? "datasets" : "base models"}.` });
+  }
+  return out;
+}
+
 // ------------------------------------------------------------ the explanation
 
 export function explainRuns(a: ExplainInput, b: ExplainInput, code: CodeChanges | null): RunExplanation {
@@ -302,7 +342,15 @@ export function explainRuns(a: ExplainInput, b: ExplainInput, code: CodeChanges 
 
   const cfgA = { ...a.manifest.hyperparameters, ...a.effectiveConfig };
   const cfgB = { ...b.manifest.hyperparameters, ...b.effectiveConfig };
-  const causes = [...configCauses(cfgA, cfgB, divergedAt, lengthA), ...codeCauses(code), ...envCauses(a.summary.env, b.summary.env), ...hardwareCauses(a, b)];
+  const inputsA = a.summary.inputs ?? [];
+  const inputsB = b.summary.inputs ?? [];
+  const causes = [
+    ...configCauses(cfgA, cfgB, divergedAt, lengthA),
+    ...codeCauses(code),
+    ...inputCauses(inputsA, inputsB),
+    ...envCauses(a.summary.env, b.summary.env),
+    ...hardwareCauses(a, b),
+  ];
 
   // Diverging in the first few percent of training points at init, data or the base LR rather than the schedule.
   if (divergedAt !== null && lengthA) {
@@ -325,6 +373,9 @@ export function explainRuns(a: ExplainInput, b: ExplainInput, code: CodeChanges 
   const has = (cat: CauseCategory) => causes.some((c) => c.category === cat);
   if (!has("config")) unchanged.push("Config and hyperparameters");
   if (code && !code.unknown && !has("code")) unchanged.push("Code");
+  const datasetsA = inputsA.filter((i) => i.kind === "dataset");
+  const datasetsB = inputsB.filter((i) => i.kind === "dataset");
+  if (datasetsA.length && datasetsB.length && !has("data")) unchanged.push("Data");
   if (a.summary.env && b.summary.env && !has("environment")) unchanged.push("Environment");
   if (!has("hardware") && a.summary.env?.gpus?.length && b.summary.env?.gpus?.length) unchanged.push("Hardware");
 
@@ -332,7 +383,8 @@ export function explainRuns(a: ExplainInput, b: ExplainInput, code: CodeChanges 
   if (!metric) notes.push("The runs share no logged metric, so there's nothing to compare. Log the same metric with converge.log in both.");
   if (code?.unknown) notes.push("Couldn't compare the code: a run has no git commit, or its commit isn't in this repository.");
   if (!a.summary.env || !b.summary.env) notes.push("A run has no environment record, so package and driver changes weren't checked.");
-  notes.push("Dataset contents aren't fingerprinted yet, so data changes can't be ruled out.");
+  if (!datasetsA.length || !datasetsB.length)
+    notes.push("A run has no dataset fingerprint, so data changes can't be ruled out. Datasets from Hugging Face's load_dataset are recorded automatically; for local data, call run.log_dataset(path).");
   if (verdict === "within-noise") notes.push("The gap is within the run's own noise. Repeat both runs with different seeds before trusting it.");
   if (verdict === "worse" && !causes.some((c) => c.score >= 0.35)) notes.push("Nothing that changed is a likely cause. Suspect data changes or randomness, and repeat the runs with a fixed seed.");
 

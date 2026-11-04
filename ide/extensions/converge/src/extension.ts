@@ -1,6 +1,6 @@
 import path from "node:path";
 import * as vscode from "vscode";
-import { isTerminal, type Machine } from "@converge/run-protocol";
+import { checkProbe, isTerminal, type Machine } from "@converge/run-protocol";
 import { projectSlug, type CloudPodView, type CloudStatus, type RunListItem, type WalletSummary } from "@converge/core";
 import { formatDuration, formatMiB, formatNumber } from "@converge/ui/format";
 import { Host, readSettings, requireTrust } from "./host.ts";
@@ -237,6 +237,7 @@ Click to open your wallet`;
   reg("converge.openWallet", () => panels.open({ view: "wallet" }));
   reg("converge.openGpus", () => panels.open({ view: "gpus" }));
   reg("converge.openModels", () => panels.open({ view: "models" }));
+  reg("converge.setupPhoneAlerts", () => panels.open({ view: "alerts" }));
   reg("converge.openHub", (machineId?: unknown) => panels.open({ view: "hub", machineId: typeof machineId === "string" ? machineId : null }));
   reg("converge.openEnvironments", (machineId?: unknown) => panels.open({ view: "envs", machineId: typeof machineId === "string" ? machineId : null }));
   reg("converge.cloudSignIn", async () => {
@@ -401,6 +402,7 @@ async function launchFlow(h: Host, panels: Panels, file?: vscode.Uri, prefill: L
     ? h.service.findMachine(prefill.machineId)
     : await pickMachine(h, "Run on which machine?", prefill.machineId ?? defaultMachineId);
   if (!machine) return;
+  if (!(await environmentOk(h, machine))) return;
 
   let command = prefill.command;
   if (!command) {
@@ -445,6 +447,34 @@ async function launchFlow(h: Host, panels: Panels, file?: vscode.Uri, prefill: L
 }
 
 const lastCommand = new Map<string, string>();
+
+/**
+ * A machine whose PyTorch can't use its GPU (wrong CUDA build, old driver, no kernels for the GPU)
+ * would train on the CPU or crash. Say so before launching, and offer the fix. True to go ahead.
+ */
+async function environmentOk(h: Host, machine: Machine): Promise<boolean> {
+  const issue = checkProbe(h.service.listProbes()[machine.id]).find((i) => i.severity === "error");
+  if (!issue) return true;
+  const fix = issue.fix ? `Fix: ${issue.fix.label}` : null;
+  const pick = await vscode.window.showWarningMessage(`${machine.name}: ${issue.title}`, { modal: true, detail: issue.detail }, ...(fix ? [fix] : []), "Run Anyway");
+  if (pick === "Run Anyway") return true;
+  if (!pick || !issue.fix) return false;
+  const res = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Converlt: ${issue.fix.label} on ${machine.name}…` }, async () => {
+    const r = await h.service.installPackages(machine.id, machine.python, { requirements: issue.fix!.requirements });
+    if (r.ok) await h.service.probeMachine(machine.id);
+    return r;
+  });
+  if (!res.ok) {
+    void vscode.window.showErrorMessage(`Converlt: the install failed. ${res.log.trim().split("\n").slice(-3).join(" ")}`);
+    return false;
+  }
+  const left = checkProbe(h.service.listProbes()[machine.id]).find((i) => i.severity === "error");
+  if (left) {
+    void vscode.window.showWarningMessage(`Converlt: installed, but ${machine.name} still has a problem: ${left.title}`);
+    return false;
+  }
+  return true;
+}
 
 // ---------------------------------------------------------------- machines
 

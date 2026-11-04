@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ChevronLeft,
   CircleX,
   Clock,
   Cpu,
+  Database,
   DollarSign,
   FileDiff,
   Gauge,
@@ -24,12 +25,14 @@ import { isTerminal, primaryMetricKey, seriesStats, type DiagnosticEvent, type R
 import type { RunView } from "@converge/core/api";
 import { api, errorMessage, useRun } from "../api.ts";
 import { LineChart, SERIES_COLORS, smooth } from "../components/Chart.tsx";
+import { formatCredits } from "../cloud.ts";
+import { ForecastCard, type RentRequest } from "../components/ForecastCard.tsx";
 import { Empty, Meter, StatusPill, Switch, useToast } from "../components/ui.tsx";
 import { formatBytes, formatDate, formatDuration, formatMiB, formatNumber, formatUsd, formatValue } from "../format.ts";
 
 type Tab = "overview" | "logs" | "config" | "env" | "notes";
 
-export function RunDetail({ runId, onBack, onReproduce }: { runId: string; onBack: () => void; onReproduce: (runId: string) => void }) {
+export function RunDetail({ runId, onBack, onReproduce, onRent }: { runId: string; onBack: () => void; onReproduce: (runId: string) => void; onRent?: (r: RentRequest) => void }) {
   const run = useRun(runId);
   const [tab, setTab] = useState<Tab>("overview");
   const toast = useToast();
@@ -125,6 +128,7 @@ export function RunDetail({ runId, onBack, onReproduce }: { runId: string; onBac
       )}
 
       <Stats run={run} />
+      <ForecastCard run={run} onRent={onRent} />
 
       {s.diagnostics.map((d) => (
         <DiagnosticCard key={d.kind} d={d} run={run} />
@@ -181,6 +185,7 @@ function Stats({ run }: { run: RunView }) {
   const total = gpus.reduce((a, g) => a + g.memTotalMiB, 0);
   const utils = gpus.map((g) => g.utilPct).filter((u): u is number => u !== null);
   const live = run.status === "running";
+  const cloudRate = run.manifest.machine.cloudPricePerHour;
   return (
     <div className="stat-grid">
       <Stat icon={<Gauge size={13} />} label={key ?? "Metric"} value={st ? (st.last === null ? <span style={{ color: "var(--err)" }}>NaN</span> : formatNumber(st.last)) : "—"} sub={st ? `min ${formatNumber(st.min)} · step ${formatNumber(st.lastStep)}` : "Log metrics with the Converlt SDK"} />
@@ -188,8 +193,14 @@ function Stats({ run }: { run: RunView }) {
       <Stat
         icon={<DollarSign size={13} />}
         label="Est. compute cost"
-        value={formatUsd(run.costUsd)}
-        sub={run.manifest.machine.hourlyRate !== undefined ? `at $${run.manifest.machine.hourlyRate}/hr (your estimate)` : "set an hourly rate on the machine"}
+        value={cloudRate !== undefined ? `${formatCredits(((run.durationSec ?? 0) / 3600) * cloudRate, 0)} credits` : formatUsd(run.costUsd)}
+        sub={
+          cloudRate !== undefined
+            ? `at ${formatCredits(cloudRate, 0)} credits/hr (Converlt Cloud)`
+            : run.manifest.machine.hourlyRate !== undefined
+              ? `at $${run.manifest.machine.hourlyRate}/hr (your estimate)`
+              : "set an hourly rate on the machine"
+        }
       />
       <Stat
         icon={<MemoryStick size={13} />}
@@ -225,12 +236,17 @@ function DiagnosticCard({ d, run }: { d: DiagnosticEvent; run: RunView }) {
   const data = (d.data ?? {}) as Record<string, any>;
   const icon = d.severity === "error" ? <OctagonAlert size={18} /> : d.severity === "warning" ? <TriangleAlert size={18} /> : <Info size={18} />;
   let title = d.message;
+  /** A plain-language explanation of the cause, shown under the title. */
+  let why: string | null = null;
   let facts: ReactNode = null;
   let tips: string[] = [];
+  let code: string | null = null;
   let detail: string | null = null;
 
   if (d.kind === "nan") {
     title = "Non-finite training loss detected";
+    why = data.nanVerdict ?? null;
+    const where: Record<string, string> = { weights: "weights", gradients: "gradients (backward pass)", forward: "forward pass or loss" };
     facts = (
       <>
         <Fact label="Metric">{String(data.metric ?? "loss")}</Fact>
@@ -241,17 +257,84 @@ function DiagnosticCard({ d, run }: { d: DiagnosticEvent; run: RunView }) {
             {formatNumber(data.lastFiniteValue)} @ step {data.lastFiniteStep ?? "?"}
           </Fact>
         )}
+        {data.nanWhere && <Fact label="Started in">{where[data.nanWhere] ?? data.nanWhere}</Fact>}
+        {data.nanLayer && <Fact label="First layer">{data.nanLayer}</Fact>}
         <Fact label="Source">{data.source === "sdk" ? "SDK metric" : "log output"}</Fact>
         {data.stoppedRun && <Fact label="Action">run stopped</Fact>}
       </>
     );
-    tips = [
-      "Check whether the learning rate or schedule changed near this step.",
-      "With mixed precision, check loss scaling; try bf16 or a lower initial scale.",
-      "Add gradient clipping and inspect gradient norms around the failing step.",
-      "Compare with the last successful run's config and code diff.",
+    if (data.nanWhere === "forward")
+      tips = [
+        "Look for log, sqrt or division in the model and the loss; add a small epsilon (e.g. torch.log(x + 1e-8), x / (y + 1e-8)).",
+        "Check the input batch at this step for NaN/Inf values or empty targets.",
+        "With mixed precision, run the loss computation in float32.",
+      ];
+    else if (data.nanWhere === "gradients")
+      tips = [
+        "With fp16, wrap the step in torch.amp.GradScaler, or switch to bf16, which has fp32's range.",
+        "Clip gradients before the optimizer step: torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0).",
+        `Lower the learning rate, or lengthen warmup${data.nanLayer ? `; ${data.nanLayer} is where it starts` : ""}.`,
+      ];
+    else if (data.nanWhere === "weights")
+      tips = [
+        "The bad update happened before this step: lower the learning rate and add gradient clipping.",
+        "Resume from a checkpoint before the failing step rather than continuing.",
+        "Compare with the last good run: Compare → Why are these different?",
+      ];
+    else
+      tips = [
+        "Check whether the learning rate or schedule changed near this step.",
+        "With mixed precision, check loss scaling; try bf16 or a lower initial scale.",
+        "Add gradient clipping and inspect gradient norms around the failing step.",
+        "To have Converlt find where the NaN starts, add run.watch(model) after converge.run().",
+      ];
+    const norms = (data.largestGradNorms as { name: string; norm: number }[] | undefined) ?? [];
+    const list = (names: string[] | undefined, count: number | undefined) =>
+      names?.length ? names.join(", ") + (count && count > names.length ? ` and ${count - names.length} more` : "") : null;
+    const grads = list(data.nonFiniteGrads, data.nonFiniteGradCount);
+    const weights = list(data.nonFiniteWeights, data.nonFiniteWeightCount);
+    const parts = [
+      data.line,
+      norms.length ? `Largest gradient norms:\n${norms.map((g) => `  ${g.name}: ${formatNumber(g.norm)}`).join("\n")}` : null,
+      grads && `Non-finite gradients: ${grads}`,
+      weights && `Non-finite weights: ${weights}`,
     ];
-    detail = data.line ?? null;
+    detail = parts.filter(Boolean).join("\n\n") || null;
+  } else if (d.kind === "dataloader") {
+    title = "The data loader is the bottleneck";
+    why = d.message;
+    const workers = data.numWorkers as number | null | undefined;
+    const suggested = data.suggestedWorkers as number;
+    facts = (
+      <>
+        <Fact label="Waiting for data">{Math.round(data.dataWaitPct)}% of the time</Fact>
+        {workers != null && <Fact label="num_workers">{workers}</Fact>}
+        {data.batchSize != null && <Fact label="batch_size">{data.batchSize}</Fact>}
+        {data.pinMemory != null && <Fact label="pin_memory">{String(data.pinMemory)}</Fact>}
+        {data.avgUtilPct != null && <Fact label="GPU busy">{Math.round(data.avgUtilPct)}%</Fact>}
+        <Fact label="CPU cores">{data.cpuCount}</Fact>
+      </>
+    );
+    if (workers != null && workers < suggested) {
+      tips.push(`Load in parallel: num_workers=${suggested} (this machine has ${data.cpuCount} CPU cores).`);
+      if (data.pinMemory === false) tips.push("pin_memory=True speeds up copies to the GPU.");
+      if (data.persistentWorkers === false) tips.push("persistent_workers=True keeps workers alive between epochs instead of restarting them.");
+      code = `DataLoader(dataset, batch_size=${data.batchSize ?? "…"}, num_workers=${suggested}, pin_memory=True, persistent_workers=True, prefetch_factor=4)`;
+    } else {
+      tips.push(`Loading is slow even with ${workers ?? "several"} workers: each sample takes too long to prepare.`);
+      tips.push("Do less per sample: pre-resize images or pre-tokenize text once and cache it, instead of on every epoch.");
+      tips.push("Move augmentation onto the GPU (e.g. torchvision.transforms.v2 on GPU tensors), or use a faster decoder.");
+      tips.push("If data streams from network storage, copy it to the machine's local disk first.");
+    }
+  } else if (d.kind === "perf" && data.avgUtilPct !== undefined && data.dataWaitPct !== undefined && data.dataWaitPct < 15) {
+    title = "The GPU is underused, and the data loader isn't why";
+    why = `GPU utilization averaged ${Math.round(data.avgUtilPct)}%, but the training loop waited for data only ${Math.round(data.dataWaitPct)}% of the time. The time goes to work between GPU kernels.`;
+    tips = [
+      "Increase the batch size: small batches leave the GPU idle between kernels.",
+      "Avoid a CPU sync every step: .item(), .cpu(), printing tensors, or logging metrics on every step.",
+      "Try torch.compile(model) and bf16 autocast to cut kernel launch overhead.",
+      "Look for Python-side work in the step: loops over the batch, numpy conversions, metric computation.",
+    ];
   } else if (d.kind === "oom") {
     title = "CUDA out of memory";
     const gpu = (data.gpus as any[] | undefined)?.[0];
@@ -310,7 +393,11 @@ function DiagnosticCard({ d, run }: { d: DiagnosticEvent; run: RunView }) {
             </button>
           )}
         </div>
-        {d.kind !== "exit" && d.kind !== "nan" && d.kind !== "oom" && title !== d.message && <div className="muted" style={{ marginTop: 3 }}>{d.message}</div>}
+        {why ? (
+          <div style={{ marginTop: 3 }}>{why}</div>
+        ) : (
+          d.kind !== "exit" && d.kind !== "nan" && d.kind !== "oom" && title !== d.message && <div className="muted" style={{ marginTop: 3 }}>{d.message}</div>
+        )}
         {facts && <div className="diag-facts">{facts}</div>}
         {tips.length > 0 && (
           <ul>
@@ -318,6 +405,11 @@ function DiagnosticCard({ d, run }: { d: DiagnosticEvent; run: RunView }) {
               <li key={t}>{t}</li>
             ))}
           </ul>
+        )}
+        {code && (
+          <pre className="code-block selectable" style={{ marginTop: 8 }}>
+            {code}
+          </pre>
         )}
         {open && detail && (
           <pre className="code-block" style={{ marginTop: 10 }}>
@@ -591,6 +683,7 @@ function EnvTab({ run }: { run: RunView }) {
             )}
           </div>
         </div>
+        <InputsCard run={run} />
         <div className="card">
           <div className="card-head">
             <Cpu size={15} />
@@ -638,6 +731,49 @@ function EnvTab({ run }: { run: RunView }) {
           </div>
           <pre className="code-block" style={{ maxHeight: 420 }}>{pkgs.join("\n") || "—"}</pre>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Datasets and pretrained weights the run read, with the fingerprints Compare uses to spot data changes. */
+function InputsCard({ run }: { run: RunView }) {
+  const inputs = run.summary.inputs ?? [];
+  return (
+    <div className="card">
+      <div className="card-head">
+        <Database size={15} />
+        <div className="card-title">Data & weights</div>
+      </div>
+      <div className="card-body">
+        {inputs.length === 0 ? (
+          <span className="faint">
+            None recorded. Hugging Face <span className="mono">load_dataset</span> and <span className="mono">from_pretrained</span> are recorded automatically; for local data, call{" "}
+            <span className="mono">run.log_dataset("data/train")</span>.
+          </span>
+        ) : (
+          <dl className="kv">
+            {inputs.map((i) => (
+              <Fragment key={`${i.kind}:${i.name}`}>
+                <dt>{i.kind === "dataset" ? "Dataset" : "Weights"}</dt>
+                <dd>
+                  <span className="mono selectable">{i.name}</span>
+                  <div className="faint" style={{ fontSize: 11.5 }}>
+                    {[
+                      i.fingerprint ? `fingerprint ${i.fingerprint.slice(0, 12)}` : "no fingerprint",
+                      i.revision ? `revision ${i.revision.slice(0, 10)}` : null,
+                      i.files != null ? `${i.files.toLocaleString()} files` : null,
+                      i.bytes != null ? formatBytes(i.bytes) : null,
+                      i.source === "auto" ? "recorded automatically" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </dd>
+              </Fragment>
+            ))}
+          </dl>
+        )}
       </div>
     </div>
   );

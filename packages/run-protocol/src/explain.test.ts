@@ -101,7 +101,7 @@ test("ranks code, environment and hardware changes, and notes what couldn't be c
   assert.ok(by("transformers"));
   assert.ok(!x.unchanged.includes("Code"));
   assert.ok(x.unchanged.includes("Config and hyperparameters"));
-  assert.ok(x.notes.some((n) => /Dataset contents/.test(n)));
+  assert.ok(x.notes.some((n) => /no dataset fingerprint/.test(n)));
   assert.ok(explainRuns(a, b, { committedFiles: [], uncommittedFiles: [], unknown: true }).notes.some((n) => /Couldn't compare the code/.test(n)));
 });
 
@@ -131,4 +131,36 @@ test("patch helpers list and split files", () => {
   const byFile = patchByFile(patch);
   assert.deepEqual([...byFile.keys()].sort(), ["new.py", "train.py"]);
   assert.match(byFile.get("train.py")!, /\+lr=2/);
+});
+
+test("a changed dataset fingerprint is a top cause; matching fingerprints count as unchanged data", () => {
+  const ds = (fingerprint: string, files = 100) => ({ seq: 1, ts: 0, type: "input" as const, kind: "dataset" as const, name: "data/train", fingerprint, files, source: "sdk" as const });
+  const a = run({ lr: 3e-4 }, { "train/loss": curve(3000) });
+  const b = run({ lr: 3e-4 }, { "train/loss": curve(3000, { breakAt: 300, after: (_s, v) => v + 0.3 }) });
+  a.summary.inputs = [ds("aaaaaaaaaaaaaaaa", 100)];
+  b.summary.inputs = [ds("bbbbbbbbbbbbbbbb", 140)];
+  const x = explainRuns(a, b, NO_CODE);
+  assert.equal(x.causes[0]!.category, "data");
+  assert.equal(x.causes[0]!.subject, "Dataset data/train");
+  assert.match(x.causes[0]!.reason, /100 → 140 files/);
+  assert.ok(!x.notes.some((n) => /no dataset fingerprint/.test(n)));
+
+  b.summary.inputs = [ds("aaaaaaaaaaaaaaaa", 100)];
+  const y = explainRuns(a, b, NO_CODE);
+  assert.ok(!y.causes.some((c) => c.category === "data"));
+  assert.ok(y.unchanged.includes("Data"));
+});
+
+test("runs that used different base models say so", () => {
+  const w = (name: string) => ({ seq: 1, ts: 0, type: "input" as const, kind: "weights" as const, name, revision: "abc", source: "auto" as const });
+  const a = run({}, { "train/loss": curve(3000) });
+  const b = run({}, { "train/loss": curve(3000, { breakAt: 300, after: (_s, v) => v + 0.3 }) });
+  a.summary.inputs = [w("gpt2")];
+  b.summary.inputs = [w("distilgpt2")];
+  const x = explainRuns(a, b, NO_CODE);
+  const c = x.causes.find((c) => c.category === "data")!;
+  assert.equal(c.subject, "Pretrained weights");
+  assert.equal(c.from, "gpt2");
+  assert.equal(c.to, "distilgpt2");
+  assert.match(x.notes.join(" "), /no dataset fingerprint/);
 });

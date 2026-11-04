@@ -5,3 +5,5 @@ export * from "./compare.ts";
 export * from "./args.ts";
 export * from "./cost.ts";
 export * from "./explain.ts";
+export * from "./forecast.ts";
+export * from "./envcheck.ts";

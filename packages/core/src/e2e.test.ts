@@ -26,7 +26,8 @@ async function stageRemote(dir: string): Promise<string> {
   await mkdir(path.join(dir, "agent"), { recursive: true });
   await mkdir(path.join(dir, "sdk", "converge"), { recursive: true });
   await cp(path.join(repo, "services/remote-agent/converge_agent.py"), path.join(dir, "agent/converge_agent.py"));
-  await cp(path.join(repo, "python/converge-runtime/converge/__init__.py"), path.join(dir, "sdk/converge/__init__.py"));
+  for (const f of ["__init__.py", "_inputs.py", "_autohook.py"]) await cp(path.join(repo, "python/converge-runtime/converge", f), path.join(dir, "sdk/converge", f));
+  await cp(path.join(repo, "python/converge-runtime/sitecustomize.py"), path.join(dir, "sdk/sitecustomize.py"));
   return dir;
 }
 

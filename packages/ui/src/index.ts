@@ -17,3 +17,7 @@ export { Environments } from "./pages/Environments.tsx";
 export { Home } from "./pages/Home.tsx";
 export { creditsUsd, formatCredits, formatHours, useCloudStatus, usePods, useWallet } from "./cloud.ts";
 export { Hub } from "./pages/Hub.tsx";
+export { PhoneAlerts } from "./pages/PhoneAlerts.tsx";
+export { EnvIssues } from "./components/EnvIssues.tsx";
+export type { RentRequest } from "./components/ForecastCard.tsx";
+export type { GpuPreselect } from "./pages/Gpus.tsx";

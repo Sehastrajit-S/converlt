@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Boxes, Clock, Cpu, LoaderCircle, Play, Power, Rocket, Search, Server, ShieldCheck, Square, Terminal, Trash2, Users } from "lucide-react";
+import type { RunOptions } from "@converge/run-protocol";
 import type { AppState, CloudPodView } from "@converge/core/api";
 import { POD_IMAGES, type CloudType, type GpuOffer, type WalletSummary } from "@converge/core/cloud";
 import { api, errorMessage } from "../api.ts";
 import { creditsUsd, formatCredits, formatHours, usePods } from "../cloud.ts";
-import { Dialog, Segmented, useToast } from "../components/ui.tsx";
+import { Dialog, Segmented, Switch, useToast } from "../components/ui.tsx";
 import { CloudGate } from "./Wallet.tsx";
 
 export interface GpuActions {
@@ -13,14 +14,22 @@ export interface GpuActions {
   onEnvironments: (machineId: string) => void;
 }
 
-export function Gpus({ state, ...actions }: { state: AppState } & GpuActions) {
-  return <CloudGate>{(w, reload) => <GpusBody state={state} wallet={w} reloadWallet={reload} {...actions} />}</CloudGate>;
+/** Open the launch dialog for this offer, optionally with a run to start once the pod is up. */
+export interface GpuPreselect {
+  offerId: string;
+  cloud: CloudType;
+  thenRun?: ThenRun;
+}
+type ThenRun = { command: string; options: RunOptions };
+
+export function Gpus({ state, preselect, ...actions }: { state: AppState; preselect?: GpuPreselect | null } & GpuActions) {
+  return <CloudGate>{(w, reload) => <GpusBody state={state} wallet={w} reloadWallet={reload} preselect={preselect ?? null} {...actions} />}</CloudGate>;
 }
 
 type VramFilter = "any" | "24" | "48" | "80";
 type CloudFilter = "all" | CloudType;
 
-function GpusBody({ state, wallet, reloadWallet, onRun, onEnvironments }: { state: AppState; wallet: WalletSummary; reloadWallet: () => Promise<void> } & GpuActions) {
+function GpusBody({ state, wallet, reloadWallet, preselect, onRun, onEnvironments }: { state: AppState; wallet: WalletSummary; reloadWallet: () => Promise<void>; preselect: GpuPreselect | null } & GpuActions) {
   const pods = usePods(true);
   const [offers, setOffers] = useState<GpuOffer[] | null>(null);
   const [offersError, setOffersError] = useState<string | null>(null);
@@ -28,10 +37,19 @@ function GpusBody({ state, wallet, reloadWallet, onRun, onEnvironments }: { stat
   const [vram, setVram] = useState<VramFilter>("any");
   const [query, setQuery] = useState("");
   const [launch, setLaunch] = useState<GpuOffer | null>(null);
+  const [thenRun, setThenRun] = useState<ThenRun | null>(null);
 
   useEffect(() => {
     api.gpuOffers().then(setOffers, (e) => setOffersError(errorMessage(e)));
   }, []);
+
+  useEffect(() => {
+    if (!offers || !preselect) return;
+    const o = offers.find((x) => x.id === preselect.offerId && x.cloud === preselect.cloud) ?? offers.find((x) => x.id === preselect.offerId);
+    if (!o) return;
+    setLaunch(o);
+    setThenRun(preselect.thenRun ?? null);
+  }, [offers, preselect]);
 
   // One card per GPU model, with its Secure and Community prices side by side.
   const groups = useMemo(() => {
@@ -172,9 +190,14 @@ function GpusBody({ state, wallet, reloadWallet, onRun, onEnvironments }: { stat
         <LaunchDialog
           offer={launch}
           wallet={wallet}
-          onClose={() => setLaunch(null)}
+          thenRun={thenRun}
+          onClose={() => {
+            setLaunch(null);
+            setThenRun(null);
+          }}
           onLaunched={async () => {
             setLaunch(null);
+            setThenRun(null);
             await pods.reload();
             await reloadWallet();
           }}
@@ -311,8 +334,9 @@ function PodCard({
   );
 }
 
-function LaunchDialog({ offer, wallet, onClose, onLaunched }: { offer: GpuOffer; wallet: WalletSummary; onClose: () => void; onLaunched: () => Promise<void> }) {
+function LaunchDialog({ offer, wallet, thenRun, onClose, onLaunched }: { offer: GpuOffer; wallet: WalletSummary; thenRun: ThenRun | null; onClose: () => void; onLaunched: () => Promise<void> }) {
   const toast = useToast();
+  const [runAfter, setRunAfter] = useState(!!thenRun);
   const [count, setCount] = useState<"1" | "2" | "4" | "8">("1");
   const [image, setImage] = useState<string>(POD_IMAGES[0].id);
   const [customImage, setCustomImage] = useState("");
@@ -330,8 +354,13 @@ function LaunchDialog({ offer, wallet, onClose, onLaunched }: { offer: GpuOffer;
     setBusy(true);
     setError(null);
     try {
-      await api.gpuLaunch({ gpuTypeId: offer.id, cloud: offer.cloud, gpuCount: n, name, image: image === "custom" ? customImage.trim() : image, volumeGb: Number(volume) || 0, containerDiskGb: Number(disk) || 40, idleStopMinutes: Number(idle) });
-      toast("success", `${name} is starting`, "It appears as a Converlt machine once SSH is up, usually in 1–3 minutes.");
+      const run = runAfter && thenRun ? thenRun : undefined;
+      await api.gpuLaunch({ gpuTypeId: offer.id, cloud: offer.cloud, gpuCount: n, name, image: image === "custom" ? customImage.trim() : image, volumeGb: Number(volume) || 0, containerDiskGb: Number(disk) || 40, idleStopMinutes: Number(idle), thenRun: run });
+      toast(
+        "success",
+        `${name} is starting`,
+        run ? "The run starts on it by itself once the pod is reachable, usually in 1–3 minutes. Keep the editor open until then." : "It appears as a Converlt machine once SSH is up, usually in 1–3 minutes.",
+      );
       await onLaunched();
     } catch (e) {
       setError(errorMessage(e));
@@ -381,6 +410,15 @@ function LaunchDialog({ offer, wallet, onClose, onLaunched }: { offer: GpuOffer;
         </div>
       </div>
       {!enough && <div className="callout err">Your balance doesn't cover an hour of this pod.</div>}
+      {thenRun && (
+        <div className="option-row" style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px" }}>
+          <div className="text" style={{ minWidth: 0 }}>
+            <div className="title">Then run</div>
+            <div className="hint mono truncate">{thenRun.command}</div>
+          </div>
+          <Switch on={runAfter} onChange={setRunAfter} label="Then run" />
+        </div>
+      )}
       <div className="field">
         <label>GPUs</label>
         <Segmented

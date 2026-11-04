@@ -26,6 +26,8 @@ export interface MachineRef {
   hourlyRate?: number;
   /** Set when the machine is an on-demand Converlt Cloud pod; the gateway bills it. */
   cloudPodId?: string;
+  /** Cloud pods: credits per hour while running, as billed when the run launched. */
+  cloudPricePerHour?: number;
   /** Cloud pods: minutes without GPU work before the pod stops itself (0 = never). */
   idleStopMinutes?: number;
 }
@@ -50,6 +52,11 @@ export interface RunOptions {
   telemetryIntervalSec: number;
   stallMinutes: number;
   cancelGraceSec: number;
+  /**
+   * ntfy topic URL (e.g. https://ntfy.sh/converlt-x7…). The agent on the machine posts there when
+   * the run finishes, fails or needs attention, so alerts reach a phone with the IDE closed.
+   */
+  notifyUrl?: string;
 }
 
 /** Immutable record written once when a run is created. */
@@ -74,6 +81,8 @@ export interface RunManifest {
 /** Subset of the manifest sent to the agent's `start` command. */
 export interface AgentStartRequest {
   runId: string;
+  /** Display name, e.g. "run-012", used in phone alerts. */
+  name?: string;
   project: string;
   command: string;
   workdir: string;
@@ -107,7 +116,7 @@ export interface HostSample {
   diskFreeGiB: number | null;
 }
 
-export type DiagnosticKind = "nan" | "oom" | "exit" | "stall" | "perf" | "exception" | "launch";
+export type DiagnosticKind = "nan" | "oom" | "exit" | "stall" | "perf" | "dataloader" | "exception" | "launch";
 export type Severity = "error" | "warning" | "info";
 
 interface BaseEvent {
@@ -151,8 +160,31 @@ export interface EnvEvent extends BaseEvent {
   cudaAvailable?: boolean | null;
   driver?: string | null;
   cudaVersion?: string | null;
+  /** GPU architectures this PyTorch build has kernels for, e.g. ["sm_80", "sm_90"]. */
+  torchArchList?: string[] | null;
+  /** Compute capability of GPU 0, e.g. "8.9". */
+  gpuCapability?: string | null;
   gpus?: GpuInfo[];
   packages?: string[];
+}
+
+/** A dataset or pretrained weights the run read, with a fingerprint to tell versions apart. */
+export interface InputEvent extends BaseEvent {
+  type: "input";
+  kind: "dataset" | "weights";
+  /** e.g. "imdb", "meta-llama/Llama-3.1-8B" or a local path. */
+  name: string;
+  path?: string | null;
+  /** Hub revision (commit hash) when known. */
+  revision?: string | null;
+  /** Content fingerprint; equal fingerprints mean the same data. */
+  fingerprint?: string | null;
+  /** How the fingerprint was computed, e.g. "hf-datasets", "files: names, sizes, sampled contents". */
+  method?: string | null;
+  files?: number | null;
+  bytes?: number | null;
+  /** "sdk": the script called run.log_dataset; "auto": recorded from load_dataset / from_pretrained. */
+  source?: "sdk" | "auto";
 }
 
 export interface TelemetryEvent extends BaseEvent {
@@ -186,7 +218,8 @@ export type RunEvent =
   | EnvEvent
   | TelemetryEvent
   | DiagnosticEvent
-  | ArtifactEvent;
+  | ArtifactEvent
+  | InputEvent;
 
 /** Lines emitted by `agent tail` that are not persisted run events. */
 export type TailControlLine =

@@ -45,6 +45,8 @@ RUN_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 MAX_LINE_CHARS = 4000
 CR_THROTTLE_SEC = 1.0
 HEARTBEAT_SEC = 5.0
+# Startup (worker spawn, first-batch caching) looks like a slow loader; judge throughput after this.
+DIAG_WARMUP_SEC = float(os.environ.get("CONVERGE_DIAG_WARMUP_SEC") or 180)
 
 OOM_RE = re.compile(
     r"CUDA out of memory|OutOfMemoryError|CUBLAS_STATUS_ALLOC_FAILED|CUDNN_STATUS_(?:ALLOC_FAILED|NOT_SUPPORTED.*memory)|"
@@ -54,16 +56,20 @@ OOM_RE = re.compile(
 LOG_NAN_RE = re.compile(r"\b([\w/.-]*loss[\w/.-]*)\s*[:=]\s*(nan|[-+]?inf(?:inity)?)\b", re.IGNORECASE)
 
 ENV_SNIPPET = r"""
-import json, sys
+import importlib.util, json, sys
 out = {"python": sys.version.split()[0], "pythonPath": sys.executable}
 try:
     import torch
     out["torch"] = torch.__version__
     out["torchCuda"] = torch.version.cuda
     out["cudaAvailable"] = bool(torch.cuda.is_available())
+    if out["cudaAvailable"]:
+        out["torchArchList"] = list(torch.cuda.get_arch_list())
+        out["gpuCapability"] = "%d.%d" % torch.cuda.get_device_capability(0)
 except Exception as e:
-    out["torch"] = None
+    out.setdefault("torch", None)
     out["torchError"] = "%s: %s" % (type(e).__name__, e)
+out["companions"] = [m for m in ("torchvision", "torchaudio") if importlib.util.find_spec(m)]
 print(json.dumps(out))
 """
 
@@ -200,8 +206,53 @@ def cuda_driver_version():
     if not shutil.which("nvidia-smi"):
         return None
     rc, out = run_cmd(["nvidia-smi"], timeout=10)
-    m = re.search(r"CUDA Version:\s*([\d.]+)", out or "")
+    # Drivers from the 600 series print "CUDA UMD Version: 13.3" instead of "CUDA Version: 12.4".
+    m = re.search(r"CUDA (?:UMD )?Version:\s*([\d.]+)", out or "")
     return m.group(1) if m else None
+
+
+def gpu_capability():
+    """Compute capability of GPU 0 from the driver (drivers 510+), e.g. "8.9"."""
+    if not shutil.which("nvidia-smi"):
+        return None
+    rc, out = run_cmd(["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"], timeout=10)
+    first = (out or "").strip().splitlines()[:1]
+    return first[0].strip() if rc == 0 and first and re.match(r"^\d+\.\d+$", first[0].strip()) else None
+
+
+# ---------------------------------------------------------------- phone alerts
+
+NTFY_URL_RE = re.compile(r"^(https?://[^/?#]+(?:/[^/?#]+)*)/([A-Za-z0-9_-]{1,64})/?$")
+
+
+def ntfy_publish(url, title, message, priority=3, tags=None):
+    """Posts to an ntfy topic URL (https://ntfy.sh/<topic>, or a self-hosted server). True on success."""
+    import urllib.request
+
+    m = NTFY_URL_RE.match(url or "")
+    if not m:
+        return False
+    body = {"topic": m.group(2), "title": title[:250], "message": message[:3500], "priority": priority, "tags": tags or []}
+    req = urllib.request.Request(
+        m.group(1) + "/",
+        data=json.dumps(body).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": "converlt-agent/%s" % AGENT_VERSION},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
+def fmt_duration(sec):
+    sec = int(max(0, sec))
+    if sec < 60:
+        return "%ds" % sec
+    if sec < 3600:
+        return "%dm" % (sec // 60)
+    return "%dh %dm" % (sec // 3600, (sec % 3600) // 60)
 
 
 def host_sample(path):
@@ -345,6 +396,32 @@ class Supervisor:
         self.stderr_tail = collections.deque(maxlen=40)
         self.latest_gpus = []
         self.util_window = collections.deque()
+        self.started_at = None
+        self.last_step = None
+        self.first_error = None
+        self.nan_detail = None
+        self.data_windows = collections.deque(maxlen=6)
+        self.data_wait_pct = None
+        self.notified = set()
+
+    # -- phone alerts
+
+    def name(self):
+        return str(self.manifest.get("name") or self.run_id)
+
+    def notify(self, key, title, message, priority=3, tags=None, wait=False):
+        """Sends one phone alert per key, if the run has a notify URL. Never raises."""
+        url = self.options.get("notifyUrl")
+        if not url or key in self.notified:
+            return
+        self.notified.add(key)
+        t = threading.Thread(target=ntfy_publish, args=(url, title, message, priority, tags), daemon=True)
+        t.start()
+        if wait:
+            t.join(timeout=12)
+
+    def at_step(self):
+        return " at step {:,}".format(self.last_step) if self.last_step is not None else ""
 
     # -- state
 
@@ -359,6 +436,8 @@ class Supervisor:
             write_json_atomic(os.path.join(self.run_dir, "status.json"), self.state)
 
     def diagnostic(self, kind, severity, message, step=None, data=None, once=True):
+        if severity == "error" and self.first_error is None and kind in ("oom", "exception", "nan"):
+            self.first_error = (kind, message)
         if once and kind in self.reported:
             if data:
                 # Merge further evidence into the same card on the client.
@@ -412,6 +491,7 @@ class Supervisor:
             self.set_status("failed", exitCode=None, reason="launch_error", endedAt=now())
             return
 
+        self.started_at = time.time()
         self.set_status("running", pid=self.proc.pid, pgid=self.proc.pid, startedAt=now())
         readers = [
             threading.Thread(target=self.read_stream, args=(self.proc.stdout, "stdout"), daemon=True),
@@ -435,14 +515,24 @@ class Supervisor:
 
     def finish(self, rc):
         ended = now()
+        took = " after %s" % fmt_duration(time.time() - self.started_at) if self.started_at else ""
         if self.cancel_reason == "user":
             self.set_status("cancelled", exitCode=rc, reason="user", endedAt=ended)
             return
         if self.cancel_reason == "nan":
             self.set_status("failed", exitCode=rc, reason="stopped_on_nan", endedAt=ended)
+            msg = self.first_error[1] if self.first_error else "A metric became non-finite."
+            self.notify("end", "%s stopped: NaN loss" % self.name(), "Stopped%s%s. %s" % (self.at_step(), took, msg), priority=4, tags=["warning"], wait=True)
             return
         if rc == 0:
             self.set_status("completed", exitCode=0, endedAt=ended)
+            # Report the validation loss if there is one, else a loss, else any metric.
+            keys = sorted(self.last_finite, key=lambda k: (not re.search(r"val.*loss", k, re.I), not re.search(r"loss", k, re.I), k))
+            metric = ""
+            if keys:
+                step, v = self.last_finite[keys[0]]
+                metric = " %s %.4g%s." % (keys[0], v, " at step {:,}".format(step) if step is not None else "")
+            self.notify("end", "%s finished" % self.name(), "Training completed%s.%s" % (took, metric), priority=3, tags=["white_check_mark"], wait=True)
             return
         if rc < 0:
             sig = -rc
@@ -461,6 +551,13 @@ class Supervisor:
             msg = "Training stopped after a CUDA out-of-memory error (exit code %s)." % rc
         self.diagnostic("exit", "error", msg, data={"exitCode": rc, "stderrTail": list(self.stderr_tail)})
         self.set_status("failed", exitCode=rc, reason="exit_code", endedAt=ended)
+        if self.first_error and self.first_error[0] == "oom":
+            why = "CUDA out of memory."
+        elif self.first_error:
+            why = self.first_error[1]
+        else:
+            why = msg
+        self.notify("end", "%s failed" % self.name(), "Failed%s%s: %s" % (self.at_step(), took, why), priority=4, tags=["rotating_light"], wait=True)
 
     # -- process output
 
@@ -568,6 +665,8 @@ class Supervisor:
             step = rec.get("step")
             step = int(step) if isinstance(step, (int, float)) and not isinstance(step, bool) else None
             self.last_activity = time.time()
+            if step is not None and (self.last_step is None or step > self.last_step):
+                self.last_step = step
             self.events.emit("metric", step=step, values=values)
             for k, v in values.items():
                 if is_non_finite(v):
@@ -593,6 +692,56 @@ class Supervisor:
                 "%s: %s" % (rec.get("excType", "Exception"), str(rec.get("message", ""))[:500]),
                 data={"traceback": rec.get("traceback", "")[-6000:]},
             )
+        elif kind == "nan_detail":
+            # Where the non-finite values are (weights, gradients, or neither); the SDK writes it
+            # just before the metric, but a log-detected NaN may already have opened the card.
+            self.nan_detail = dict(rec.get("data") or {})
+            if "nan" in self.reported:
+                self.events.emit("diagnostic", kind="nan", severity="error", message="Non-finite value detected.", step=None, data=self.nan_detail)
+        elif kind == "perf":
+            self.on_data_window(rec)
+        elif kind == "input":
+            fields = {k: rec.get(k) for k in ("kind", "name", "path", "revision", "fingerprint", "method", "files", "bytes", "source")}
+            if fields["kind"] in ("dataset", "weights") and fields["name"]:
+                self.events.emit("input", **{k: v for k, v in fields.items() if v is not None})
+
+    def on_data_window(self, rec):
+        """Data-loader timing from the SDK: how much of each window the training loop waited for batches."""
+        wall = rec.get("wallSec")
+        wait = rec.get("dataWaitSec")
+        if not isinstance(wall, (int, float)) or not isinstance(wait, (int, float)) or wall <= 0:
+            return
+        self.data_windows.append((min(wait, wall), wall, rec))
+        total_wall = sum(w for _, w, _ in self.data_windows)
+        if total_wall < min(60, DIAG_WARMUP_SEC):
+            return
+        pct = 100.0 * sum(x for x, _, _ in self.data_windows) / total_wall
+        self.data_wait_pct = round(pct, 1)
+        if pct < 40 or "dataloader" in self.reported or not self.started_at or time.time() - self.started_at < DIAG_WARMUP_SEC:
+            return
+        workers = rec.get("numWorkers")
+        cpus = os.cpu_count() or 1
+        per_gpu = max(1, cpus // max(1, len(self.latest_gpus) or 1))
+        suggest = max(2, min(8, per_gpu - 1))
+        data = {
+            "dataWaitPct": self.data_wait_pct,
+            "numWorkers": workers,
+            "suggestedWorkers": suggest,
+            "pinMemory": rec.get("pinMemory"),
+            "persistentWorkers": rec.get("persistentWorkers"),
+            "batchSize": rec.get("batchSize"),
+            "cpuCount": cpus,
+        }
+        utils = [u for _, u in self.util_window]
+        if utils:
+            data["avgUtilPct"] = round(sum(utils) / len(utils), 1)
+        workers_txt = " with num_workers=%s" % workers if workers is not None else ""
+        self.diagnostic(
+            "dataloader",
+            "warning",
+            "%d%% of training time is spent waiting for the next batch%s. The GPU sits idle while the data loader prepares data." % (round(pct), workers_txt),
+            data=data,
+        )
 
     def on_nan(self, key, step, source, value="NaN", line=None):
         # A log-pattern hit often arrives before the SDK metric for the same step;
@@ -608,11 +757,19 @@ class Supervisor:
             data["lastFiniteStep"], data["lastFiniteValue"] = last
         if line:
             data["line"] = line
+        if self.nan_detail:
+            data.update(self.nan_detail)
         stop = bool(self.options.get("stopOnNan"))
         data["stoppedRun"] = stop
-        self.events.emit("diagnostic", kind="nan", severity="error", message="Non-finite value detected in %s." % key, step=step, data=data)
+        message = "Non-finite value detected in %s." % key
+        if first and self.first_error is None:
+            self.first_error = ("nan", message)
+        self.events.emit("diagnostic", kind="nan", severity="error", message=message, step=step, data=data)
         if stop and first:
             self.begin_cancel("nan")
+        elif first:
+            where = " at step {:,}".format(step) if step is not None else self.at_step()
+            self.notify("nan", "%s: NaN loss" % self.name(), "%s is %s%s. The run is still going; it won't recover on its own." % (key, value, where), priority=4, tags=["warning"])
 
     # -- telemetry and watchdog
 
@@ -639,11 +796,14 @@ class Supervisor:
             if ts - started > 300 and len(self.util_window) >= 5:
                 avg = sum(u for _, u in self.util_window) / len(self.util_window)
                 if avg < 20 and "perf" not in self.reported:
+                    data = {"avgUtilPct": round(avg, 1)}
+                    if self.data_wait_pct is not None:
+                        data["dataWaitPct"] = self.data_wait_pct
                     self.diagnostic(
                         "perf",
                         "warning",
                         "GPU utilization averaged %.0f%% over the last 5 minutes. The input pipeline or CPU work may be the bottleneck." % avg,
-                        data={"avgUtilPct": round(avg, 1)},
+                        data=data,
                     )
             for g in gpus:
                 if g["memTotalMiB"] and g["memUsedMiB"] / g["memTotalMiB"] > 0.97 and "vram" not in self.reported:
@@ -664,12 +824,9 @@ class Supervisor:
             if self.cancel_reason is None and os.path.exists(cancel_path):
                 self.begin_cancel("user")
             if stall_sec and "stall" not in self.reported and time.time() - self.last_activity > stall_sec:
-                self.diagnostic(
-                    "stall",
-                    "warning",
-                    "No output or metrics for %d minutes. Training may be stalled." % (stall_sec // 60),
-                    data={"silentForSec": int(time.time() - self.last_activity)},
-                )
+                message = "No output or metrics for %d minutes. Training may be stalled." % (stall_sec // 60)
+                self.diagnostic("stall", "warning", message, data={"silentForSec": int(time.time() - self.last_activity)})
+                self.notify("stall", "%s may be stalled" % self.name(), message, priority=4, tags=["hourglass"])
 
     def begin_cancel(self, reason):
         if self.cancel_reason is not None or self.proc is None:
@@ -707,6 +864,9 @@ class Supervisor:
         except (OSError, subprocess.SubprocessError, ValueError, IndexError):
             pass
         info.pop("torchError", None)
+        info.pop("companions", None)
+        if not info.get("gpuCapability"):
+            info["gpuCapability"] = gpu_capability()
         try:
             p = subprocess.run(
                 ["bash", "-lc", "%s -m pip freeze --disable-pip-version-check" % python],
@@ -760,6 +920,7 @@ def cmd_probe(args):
             "gpus": gpu_samples(gpus),
             "driver": gpus[0]["driver"] if gpus else None,
             "cudaVersion": cuda_driver_version(),
+            "gpuCapability": py.get("gpuCapability") or gpu_capability(),
             "python": py,
             "host": host,
             "workdir": workdir,

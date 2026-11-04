@@ -32,7 +32,7 @@ export class Panels implements vscode.Disposable {
     const key = routeKey(route);
     const existing = this.panels.get(key);
     if (existing) {
-      if (route.view === "compare" || route.view === "envs") void existing.webview.postMessage({ kind: "navigate", route } satisfies ToWebview);
+      if (route.view === "compare" || route.view === "envs" || route.view === "gpus") void existing.webview.postMessage({ kind: "navigate", route } satisfies ToWebview);
       existing.reveal();
       return;
     }
@@ -62,6 +62,8 @@ export class Panels implements vscode.Disposable {
         return "Wallet";
       case "gpus":
         return "GPUs";
+      case "alerts":
+        return "Phone Alerts";
       case "models":
         return "Models";
       case "envs":
@@ -119,7 +121,9 @@ export class Panels implements vscode.Disposable {
       case "openWallet":
         return this.open({ view: "wallet" });
       case "openGpus":
-        return this.open({ view: "gpus" });
+        return this.open({ view: "gpus", preselect: cmd.preselect ?? null });
+      case "openAlerts":
+        return this.open({ view: "alerts" });
       case "openModels":
         return this.open({ view: "models" });
       case "openEnvironments":

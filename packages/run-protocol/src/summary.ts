@@ -3,6 +3,7 @@ import type {
   DiagnosticEvent,
   EnvEvent,
   GpuSample,
+  InputEvent,
   RunEvent,
   RunStatus,
   TelemetryEvent,
@@ -46,6 +47,8 @@ export interface RunSummary {
   peakGpuMemMiB: number | null;
   diagnostics: DiagnosticEvent[];
   artifacts: ArtifactEvent[];
+  /** Datasets and pretrained weights, one per kind + name (the latest record wins). */
+  inputs: InputEvent[];
   logs: LogLine[];
   logCount: number;
 }
@@ -71,6 +74,7 @@ export function createSummary(): RunSummary {
     peakGpuMemMiB: null,
     diagnostics: [],
     artifacts: [],
+    inputs: [],
     logs: [],
     logCount: 0,
   };
@@ -157,6 +161,12 @@ export function applyEvent(s: RunSummary, ev: RunEvent): RunSummary {
     case "artifact":
       s.artifacts.push(ev);
       break;
+    case "input": {
+      const i = s.inputs.findIndex((x) => x.kind === ev.kind && x.name === ev.name);
+      if (i >= 0) s.inputs[i] = ev;
+      else s.inputs.push(ev);
+      break;
+    }
   }
   return s;
 }

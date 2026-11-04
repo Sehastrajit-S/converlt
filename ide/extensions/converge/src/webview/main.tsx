@@ -12,6 +12,7 @@ import {
   Home,
   Hub,
   Models,
+  PhoneAlerts,
   Wallet,
   errorMessage,
   MachineDialog,
@@ -91,10 +92,13 @@ function App({ initial }: { initial: Route }) {
     body = (
       <Gpus
         state={state}
+        preselect={route.preselect}
         onRun={(machineId) => (state.project ? setNewRun({ machineId }) : hostCommand({ name: "newRun", machineId }))}
         onEnvironments={(machineId) => hostCommand({ name: "openEnvironments", machineId })}
       />
     );
+  } else if (route.view === "alerts") {
+    body = <PhoneAlerts state={state} />;
   } else if (route.view === "models") {
     body = <Models />;
   } else if (route.view === "envs") {
@@ -112,7 +116,13 @@ function App({ initial }: { initial: Route }) {
       </div>
     );
   } else if (route.view === "run") {
-    body = <RunDetail key={route.runId} runId={route.runId} onBack={() => hostCommand({ name: "openRuns" })} onReproduce={reproduce} />;
+    body = <RunDetail
+        key={route.runId}
+        runId={route.runId}
+        onBack={() => hostCommand({ name: "openRuns" })}
+        onReproduce={reproduce}
+        onRent={({ offer, thenRun }) => hostCommand({ name: "openGpus", preselect: { offerId: offer.id, cloud: offer.cloud, thenRun } })}
+      />;
   } else if (route.view === "compare") {
     body = <Compare runs={runs} ids={route.runIds} onChange={(ids) => setRoute({ view: "compare", runIds: ids })} onOpen={(runId) => hostCommand({ name: "openRun", runId })} />;
   } else {
@@ -136,6 +146,7 @@ function App({ initial }: { initial: Route }) {
           state={state}
           prefill={newRun}
           onClose={() => setNewRun(null)}
+          onSetupAlerts={() => hostCommand({ name: "openAlerts" })}
           onLaunched={(runId) => {
             setNewRun(null);
             hostCommand({ name: "openRun", runId });

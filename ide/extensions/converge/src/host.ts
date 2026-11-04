@@ -20,6 +20,7 @@ export function readSettings(): Settings {
       stallMinutes: c.get("runs.stallMinutes", d.defaultOptions.stallMinutes),
       telemetryIntervalSec: c.get("runs.telemetryIntervalSeconds", d.defaultOptions.telemetryIntervalSec),
       cancelGraceSec: c.get("runs.cancelGraceSeconds", d.defaultOptions.cancelGraceSec),
+      notifyUrl: c.get<string>("runs.phoneAlertsUrl", "") || undefined,
     },
     theme: "system", // the editor theme applies
     notifications: c.get("notifications", d.notifications),
@@ -41,6 +42,8 @@ async function writeSettings(patch: Partial<Settings>): Promise<Settings> {
     set("runs.stallMinutes", patch.defaultOptions?.stallMinutes),
     set("runs.telemetryIntervalSeconds", patch.defaultOptions?.telemetryIntervalSec),
     set("runs.cancelGraceSeconds", patch.defaultOptions?.cancelGraceSec),
+    // "" turns alerts off; a defaultOptions patch without the key leaves them as they are.
+    set("runs.phoneAlertsUrl", patch.defaultOptions && "notifyUrl" in patch.defaultOptions ? (patch.defaultOptions.notifyUrl ?? "") : undefined),
   ]);
   return readSettings();
 }
@@ -192,6 +195,7 @@ export class Host implements vscode.Disposable {
     explainRuns: (a, b) => this.service.explainRuns(a, b),
     explainRunsWithAi: (a, b) => this.service.explainRunsWithAi(a, b),
     updateSettings: (patch) => writeSettings(patch),
+    testPhoneAlert: (url) => this.service.testPhoneAlert(url),
 
     listEnvs: (id) => this.service.listEnvs(id),
     createEnv: (id, spec) => this.service.createEnv(id, spec),

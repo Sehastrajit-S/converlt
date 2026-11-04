@@ -77,6 +77,9 @@ importers:
       '@converge/run-protocol':
         specifier: workspace:*
         version: link:../run-protocol
+      qrcode-generator:
+        specifier: 1.4.4
+        version: 1.4.4
     devDependencies:
       '@types/node':
         specifier: ^22.18.0
@@ -289,6 +292,9 @@ packages:
       '@types/react':
         optional: true
 
+  qrcode-generator@1.4.4:
+    resolution: {integrity: sha512-HM7yY8O2ilqhmULxGMpcHSF1EhJJ9yBj8gvDEuZ6M+KGJ0YY2hKpnXvRD+hZPLrDVck3ExIGhmPtSdcjC+guuw==}
+
   react-dom@19.3.0:
     resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
     peerDependencies:
@@ -439,6 +445,8 @@ snapshots:
       react: 19.3.0
     optionalDependencies:
       '@types/react': 19.3.0
+
+  qrcode-generator@1.4.4: {}
 
   react-dom@19.3.0(react@19.3.0):
     dependencies:
