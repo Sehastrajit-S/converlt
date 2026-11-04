@@ -328,6 +328,11 @@ export interface ConvergeApi {
   // Converlt Cloud: one credit wallet for on-demand GPUs and models.
   cloudStatus(): Promise<CloudStatus>;
   cloudConnect(url: string, token: string): Promise<CloudStatus>;
+  /** Sign in with a Converlt account in the browser. Opens the login page; returns the code it shows. */
+  cloudSignInStart(url?: string): Promise<{ code: string; url: string; loginUrl: string }>;
+  /** Resolves once the browser approves the sign-in (or rejects on cancel, timeout or error). */
+  cloudSignInWait(): Promise<CloudStatus>;
+  cloudSignInCancel(): Promise<void>;
   cloudDisconnect(): Promise<void>;
   cloudWallet(): Promise<WalletSummary>;
   cloudLedger(limit?: number): Promise<LedgerEntry[]>;

@@ -1,7 +1,7 @@
 import path from "node:path";
 import * as vscode from "vscode";
 import { isTerminal, type Machine } from "@converge/run-protocol";
-import { projectSlug, type CloudPodView, type RunListItem, type WalletSummary } from "@converge/core";
+import { projectSlug, type CloudPodView, type CloudStatus, type RunListItem, type WalletSummary } from "@converge/core";
 import { formatDuration, formatMiB, formatNumber } from "@converge/ui/format";
 import { Host, readSettings, requireTrust } from "./host.ts";
 import { locateDiagnostic } from "./locations.ts";
@@ -240,12 +240,26 @@ Click to open your wallet`;
   reg("converge.openHub", (machineId?: unknown) => panels.open({ view: "hub", machineId: typeof machineId === "string" ? machineId : null }));
   reg("converge.openEnvironments", (machineId?: unknown) => panels.open({ view: "envs", machineId: typeof machineId === "string" ? machineId : null }));
   reg("converge.cloudSignIn", async () => {
-    const current = await h.service.cloudStatus();
-    const url = await vscode.window.showInputBox({ title: "Converlt Cloud: gateway URL", value: current.url ?? "http://localhost:8787", ignoreFocusOut: true });
-    if (!url) return;
-    const token = await vscode.window.showInputBox({ title: "Converlt Cloud: your token", prompt: "Starts with cvt_. Stored in your OS keychain.", password: true, ignoreFocusOut: true });
-    if (!token) return;
-    const st = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Converlt: signing in…" }, () => h.service.cloudConnect(url, token));
+    const how = await vscode.window.showQuickPick(
+      [
+        { id: "browser", label: "$(github) Sign in with GitHub or Google", detail: "Opens your browser. New to Converlt? This creates your account." },
+        { id: "token", label: "$(key) Use another gateway or a token", detail: "Self-hosted gateways, or a token from your Converlt administrator." },
+      ],
+      { title: "Converlt: sign in" },
+    );
+    if (!how) return;
+    let st: CloudStatus;
+    if (how.id === "browser") {
+      st = await browserSignIn(h);
+    } else {
+      const current = await h.service.cloudStatus();
+      const url = await vscode.window.showInputBox({ title: "Converlt Cloud: gateway URL", value: current.url && !/127\.0\.0\.1/.test(current.url) ? current.url : "https://", ignoreFocusOut: true });
+      if (!url) return;
+      const token = await vscode.window.showInputBox({ title: "Converlt Cloud: your token", prompt: "Starts with cvt_. Leave empty to sign in to this gateway in the browser instead.", password: true, ignoreFocusOut: true });
+      if (token === undefined) return;
+      st = token ? await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Converlt: signing in…" }, () => h.service.cloudConnect(url, token)) : await browserSignIn(h, url);
+    }
+    if (!st.connected) return;
     void vscode.window.showInformationMessage(`Converlt: signed in as ${st.user?.email}.`);
     panels.open({ view: "wallet" });
   });
@@ -285,6 +299,23 @@ Click to open your wallet`;
 let defaultMachineId: string | null = null;
 
 /** The title bar's compute menu: pick the default machine, manage pods, launch a GPU. */
+/** Browser sign-in: opens the gateway's login page and waits, showing the code to check there. */
+async function browserSignIn(h: Host, url?: string): Promise<CloudStatus> {
+  const { code } = await h.service.cloudSignInStart(url);
+  return vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Converlt: approve the sign-in in your browser. Check it shows ${code}`, cancellable: true },
+    async (_p, cancel) => {
+      cancel.onCancellationRequested(() => void h.service.cloudSignInCancel());
+      try {
+        return await h.service.cloudSignInWait();
+      } catch (e) {
+        if (cancel.isCancellationRequested) return { connected: false, url: null, user: null, error: null };
+        throw e;
+      }
+    },
+  );
+}
+
 async function computeMenu(h: Host, ctx: vscode.ExtensionContext, panels: Panels, pods: () => CloudPodView[], changed: () => void): Promise<void> {
   type Item = vscode.QuickPickItem & { run?: () => unknown };
   const machines = h.service.listMachines();

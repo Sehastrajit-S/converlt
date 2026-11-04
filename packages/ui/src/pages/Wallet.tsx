@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowDownLeft, Bot, CircleCheck, CircleDashed, CircleX, Cloud, Coins, Cpu, Flame, HardDrive, KeyRound, LoaderCircle, LogOut, Pencil, Plus, Power, Server, Sparkles } from "lucide-react";
+import { ArrowDownLeft, Bot, CircleCheck, CircleDashed, CircleX, Cloud, Coins, Cpu, Flame, HardDrive, KeyRound, LoaderCircle, LogIn, LogOut, Pencil, Plus, Power, Server, Sparkles } from "lucide-react";
 import type { LocalGatewayStatus } from "@converge/core/api";
 import type { CloudStatus, LedgerEntry, SpendLimits, WalletSummary } from "@converge/core/cloud";
 import { Segmented } from "../components/ui.tsx";
@@ -32,7 +32,7 @@ export function CloudGate({ children }: { children: (wallet: WalletSummary, relo
 }
 
 function ConnectCard({ url, error, onConnected }: { url: string | null; error: string | null; onConnected: () => Promise<void> }) {
-  const [mode, setMode] = useState<"keys" | "account">("keys");
+  const [mode, setMode] = useState<"keys" | "account">("account");
   return (
     <div className="page">
       <div className="cloud-hero card">
@@ -59,8 +59,8 @@ function ConnectCard({ url, error, onConnected }: { url: string | null; error: s
             value={mode}
             onChange={setMode}
             options={[
-              { value: "keys", label: "Use my own keys" },
               { value: "account", label: "Converlt account" },
+              { value: "keys", label: "Use my own keys" },
             ]}
           />
         </div>
@@ -71,10 +71,75 @@ function ConnectCard({ url, error, onConnected }: { url: string | null; error: s
 }
 
 function AccountForm({ url, error, onConnected }: { url: string | null; error: string | null; onConnected: () => Promise<void> }) {
+  const [err, setErr] = useState<string | null>(error);
+  const [code, setCode] = useState<string | null>(null);
+  const [loginUrl, setLoginUrl] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+  useEffect(() => () => void api.cloudSignInCancel(), []);
+
+  const signIn = async (gateway?: string) => {
+    setErr(null);
+    try {
+      const started = await api.cloudSignInStart(gateway);
+      setCode(started.code);
+      setLoginUrl(started.loginUrl);
+      await api.cloudSignInWait();
+      await onConnected();
+    } catch (e) {
+      if (!/cancelled/i.test(errorMessage(e))) setErr(errorMessage(e));
+    } finally {
+      setCode(null);
+      setLoginUrl(null);
+    }
+  };
+
+  if (code)
+    return (
+      <div className="connect-form">
+        <div className="field">
+          <label>Finish signing in in your browser</label>
+          <span className="hint">Approve the sign-in if the page shows this code:</span>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 600, letterSpacing: "0.08em", textAlign: "center", padding: "10px 0" }}>
+            {code}
+          </div>
+          {loginUrl && (
+            <span className="hint" style={{ wordBreak: "break-all" }}>
+              Browser didn't open? Go to <span className="mono">{loginUrl}</span>
+            </span>
+          )}
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <span className="muted row" style={{ gap: 6 }}>
+            <LoaderCircle size={14} className="spin" /> Waiting for approval…
+          </span>
+          <button className="btn ghost" onClick={() => void api.cloudSignInCancel()}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+
+  return (
+    <div className="connect-form">
+      <button className="btn primary" onClick={() => void signIn()}>
+        <LogIn size={14} /> Sign in with GitHub or Google
+      </button>
+      <span className="hint">Opens your browser. New to Converlt? Signing in creates your account.</span>
+      {err && <div className="callout err">{err}</div>}
+      <button className="btn ghost sm" onClick={() => setAdvanced(!advanced)}>
+        {advanced ? "Hide" : "Use another gateway or a token"}
+      </button>
+      {advanced && <TokenForm url={url} onConnected={onConnected} onBrowserSignIn={(g) => void signIn(g)} />}
+    </div>
+  );
+}
+
+/** Self-hosted gateways, and tokens an administrator created. */
+function TokenForm({ url, onConnected, onBrowserSignIn }: { url: string | null; onConnected: () => Promise<void>; onBrowserSignIn: (gateway: string) => void }) {
   const [gateway, setGateway] = useState(url && !/127\.0\.0\.1/.test(url) ? url : "https://");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(error);
+  const [err, setErr] = useState<string | null>(null);
   const connect = async () => {
     setBusy(true);
     setErr(null);
@@ -88,21 +153,24 @@ function AccountForm({ url, error, onConnected }: { url: string | null; error: s
     }
   };
   return (
-    <div className="connect-form">
+    <>
       <div className="field">
         <label>Gateway URL</label>
         <input className="input mono" value={gateway} onChange={(e) => setGateway(e.target.value)} />
       </div>
+      <button className="btn" disabled={!/^https?:\/\/\S+/.test(gateway)} onClick={() => onBrowserSignIn(gateway)}>
+        <LogIn size={14} /> Sign in to this gateway in the browser
+      </button>
       <div className="field">
-        <label>Converlt token</label>
+        <label>Or a Converlt token</label>
         <input className="input mono" type="password" placeholder="cvt_…" value={token} onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => e.key === "Enter" && token && void connect()} />
         <span className="hint">From your Converlt administrator. Stored in your OS keychain.</span>
       </div>
       {err && <div className="callout err">{err}</div>}
-      <button className="btn primary" disabled={!token || !gateway || busy} onClick={() => void connect()}>
-        {busy ? <LoaderCircle size={14} className="spin" /> : <KeyRound size={14} />} Sign in
+      <button className="btn" disabled={!token || !gateway || busy} onClick={() => void connect()}>
+        {busy ? <LoaderCircle size={14} className="spin" /> : <KeyRound size={14} />} Sign in with token
       </button>
-    </div>
+    </>
   );
 }
 

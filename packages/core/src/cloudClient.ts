@@ -1,9 +1,13 @@
 // HTTP client for the Converlt Gateway, plus the SSH key Converlt installs in cloud pods.
 import { execFile } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { CloudPod, GpuOffer, LaunchPodRequest, LedgerEntry, ModelInfo, SpendLimits, WalletSummary } from "./cloudApi.ts";
+import type { CloudPod, GpuOffer, IdeTokenResponse, LaunchPodRequest, LedgerEntry, ModelInfo, SpendLimits, WalletSummary } from "./cloudApi.ts";
+
+/** The hosted Converlt gateway, where Converlt accounts live. */
+export const DEFAULT_CLOUD_URL = "https://converlt-server.onrender.com";
 
 export class CloudError extends Error {
   readonly status: number;
@@ -94,6 +98,75 @@ export class CloudClient {
       tokens: { input: data.usage?.prompt_tokens ?? 0, output: data.usage?.completion_tokens ?? 0 },
     };
   }
+
+  /** Signs this device out: the gateway revokes its token. */
+  async signOut(): Promise<void> {
+    await this.req("DELETE", "/v1/session", undefined, 10_000);
+  }
+}
+
+/** A browser sign-in in progress: open `loginUrl`, check `code` matches the page, then `wait`. */
+export interface BrowserSignIn {
+  loginUrl: string;
+  /** Shown both in the IDE and on the login page, so the person approves the right sign-in. */
+  code: string;
+  /** Polls the gateway until the browser approves; resolves to the device token. */
+  wait(label: string, signal: AbortSignal): Promise<IdeTokenResponse>;
+}
+
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/** The code for a login state. The login page computes the same one. */
+export function signInCode(state: string): string {
+  const d = createHash("sha256").update(state).digest();
+  let code = "";
+  for (let i = 0; i < 8; i++) code += CODE_ALPHABET[d[i]! % 32];
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+/**
+ * Starts a browser sign-in against `gateway` (PKCE: only this process knows the verifier, so
+ * only it can collect the token the browser approves).
+ */
+export function startBrowserSignIn(gateway: string, opts: { pollMs?: number; timeoutMs?: number } = {}): BrowserSignIn {
+  const base = gateway.replace(/\/+$/, "");
+  const state = randomBytes(32).toString("base64url");
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const pollMs = opts.pollMs ?? 2000;
+  const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
+  return {
+    loginUrl: `${base}/login?${new URLSearchParams({ state, challenge })}`,
+    code: signInCode(state),
+    async wait(label, signal) {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (signal.aborted) throw new CloudError("Sign-in cancelled", 0);
+        let res: Response | null = null;
+        try {
+          res = await fetch(`${base}/auth/ide/token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ state, verifier, label }),
+            signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+          });
+        } catch (e) {
+          if (signal.aborted) throw new CloudError("Sign-in cancelled", 0);
+          // A network blip or a cold-starting gateway: keep polling until the deadline.
+        }
+        if (res && res.status === 200) return (await res.json()) as IdeTokenResponse;
+        if (res && res.status !== 202 && res.status < 500) {
+          const j = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+          throw new CloudError(j?.error?.message ?? `Sign-in failed (${res.status})`, res.status);
+        }
+        await new Promise<void>((r) => {
+          const t = setTimeout(r, pollMs);
+          signal.addEventListener("abort", () => (clearTimeout(t), r()), { once: true });
+        });
+      }
+      throw new CloudError("Sign-in timed out. Try again.", 0);
+    },
+  };
 }
 
 /** Converlt's own SSH key for cloud pods, created on first use (~/.ssh/converlt_ed25519). */

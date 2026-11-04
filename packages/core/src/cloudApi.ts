@@ -9,6 +9,17 @@ export interface CloudUser {
   name: string;
 }
 
+/**
+ * Browser sign-in for the IDE. The IDE opens `<gateway>/login?state=…&challenge=…` (PKCE S256),
+ * the person approves it there, and the IDE polls `POST /auth/ide/token` with `{ state, verifier,
+ * label }`: 202 while waiting, then this, once. `DELETE /v1/session` signs that device out.
+ */
+export interface IdeTokenResponse {
+  /** A device token (cvt_…), used like any Converlt token. */
+  token: string;
+  user: CloudUser;
+}
+
 /** Monthly spend caps the user sets per category. null means no cap. */
 export interface SpendLimits {
   gpuMonthly: number | null;

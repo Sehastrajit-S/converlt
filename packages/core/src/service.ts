@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Machine, RunNotes, RunStatus } from "@converge/run-protocol";
 import type {
@@ -27,7 +28,7 @@ import type {
 } from "./api.ts";
 import { AgentClient } from "./agentClient.ts";
 import type { CloudPod, CloudStatus, GpuOffer, LaunchPodRequest, LedgerEntry, ModelInfo, SpendLimits, WalletSummary } from "./cloudApi.ts";
-import { CloudClient, ensureCloudKey } from "./cloudClient.ts";
+import { CloudClient, DEFAULT_CLOUD_URL, ensureCloudKey, startBrowserSignIn, type BrowserSignIn } from "./cloudClient.ts";
 import type { LocalGateway } from "./localGateway.ts";
 import { agentsStatus, connectAgents, type McpLaunch } from "./agents.ts";
 import { checkPython, CLOUD_ENV_ROOT, ENV_ROOT, EnvManager } from "./envs.ts";
@@ -75,6 +76,8 @@ export interface ServiceOptions {
   localGateway?: LocalGateway;
   /** How to start the Converlt MCP server, for registering it with coding agents. */
   mcp?: McpLaunch;
+  /** Opens a URL in the system browser (for signing in). */
+  openExternal?: (url: string) => Promise<boolean>;
 }
 
 export function validateMachine(input: MachineInput): MachineInput {
@@ -92,10 +95,20 @@ export function validateMachine(input: MachineInput): MachineInput {
   };
 }
 
+/** A gateway URL, normalised; https is required except for this computer. */
+function gatewayUrl(url: string): string {
+  const clean = url.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\/[^\s/]+/.test(clean)) throw new Error("Enter the gateway URL, e.g. https://cloud.converlt.dev");
+  if (/^http:\/\//.test(clean) && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(clean)) throw new Error("Use https:// for a remote gateway; plain http is only allowed for localhost.");
+  return clean;
+}
+
 /** Everything Converlt does, independent of the editor UI that hosts it. */
 export class ConvergeService {
   private readonly opts: ServiceOptions;
   private machines: Machine[];
+  /** The browser sign-in waiting for approval, if any. */
+  private signIn: { flow: BrowserSignIn; url: string; abort: AbortController } | null = null;
   private probes: Record<string, ProbeResult>;
   project: ProjectInfo | null = null;
   manager: RunManager | null = null;
@@ -412,9 +425,7 @@ export class ConvergeService {
 
   async cloudConnect(url: string, token: string): Promise<CloudStatus> {
     if (!this.opts.cloud) throw new Error("This shell can't store Converlt Cloud credentials");
-    const clean = url.trim().replace(/\/+$/, "");
-    if (!/^https?:\/\/[^\s/]+/.test(clean)) throw new Error("Enter the gateway URL, e.g. https://cloud.converlt.dev");
-    if (/^http:\/\//.test(clean) && !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(clean)) throw new Error("Use https:// for a remote gateway; plain http is only allowed for localhost.");
+    const clean = gatewayUrl(url);
     const me = await new CloudClient(clean, token.trim()).me(); // throws if the token is wrong
     await this.opts.cloud.set({ url: clean, token: token.trim() });
     this.opts.hooks.stateChanged();
@@ -426,7 +437,41 @@ export class ConvergeService {
     return (await this.opts.cloud?.get()) ?? null;
   }
 
+  /**
+   * Starts signing in with a Converlt account: opens the gateway's login page in the browser.
+   * Returns the code the page will show; then call cloudSignInWait.
+   */
+  async cloudSignInStart(url: string = DEFAULT_CLOUD_URL): Promise<{ code: string; url: string; loginUrl: string }> {
+    if (!this.opts.cloud) throw new Error("This shell can't store Converlt Cloud credentials");
+    const clean = gatewayUrl(url);
+    this.signIn?.abort.abort();
+    const s = { flow: startBrowserSignIn(clean), url: clean, abort: new AbortController() };
+    this.signIn = s;
+    if (!(await this.opts.openExternal?.(s.flow.loginUrl))) throw new Error(`Couldn't open the browser. Open ${s.flow.loginUrl} yourself.`);
+    return { code: s.flow.code, url: clean, loginUrl: s.flow.loginUrl };
+  }
+
+  /** Waits for the browser to approve the sign-in started by cloudSignInStart, then connects. */
+  async cloudSignInWait(): Promise<CloudStatus> {
+    const s = this.signIn;
+    if (!s) throw new Error("No sign-in in progress");
+    try {
+      const { token } = await s.flow.wait(`Converlt IDE on ${os.hostname()}`, s.abort.signal);
+      return await this.cloudConnect(s.url, token);
+    } finally {
+      if (this.signIn === s) this.signIn = null;
+    }
+  }
+
+  async cloudSignInCancel(): Promise<void> {
+    this.signIn?.abort.abort();
+    this.signIn = null;
+  }
+
   async cloudDisconnect(): Promise<void> {
+    // Revoke this device's token on the gateway too (best effort: signing out works offline).
+    const creds = await this.opts.cloud?.get();
+    if (creds) await new CloudClient(creds.url, creds.token).signOut().catch(() => {});
     await this.opts.cloud?.set(null);
     this.opts.hooks.stateChanged();
   }

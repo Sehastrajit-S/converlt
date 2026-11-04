@@ -97,6 +97,7 @@ export class Host implements vscode.Disposable {
       secrets,
       // "Use my own keys": the editor's own runtime runs the bundled gateway.
       localGateway: new LocalGateway({ executable: process.execPath, script: vscode.Uri.joinPath(ctx.extensionUri, "dist", "gateway", "main.mjs").fsPath, secrets }),
+      openExternal: (url) => Promise.resolve(vscode.env.openExternal(vscode.Uri.parse(url))),
       mcp: { command: process.execPath, script: vscode.Uri.joinPath(ctx.extensionUri, "dist", "mcp", "server.mjs").fsPath },
       resourcesDir: vscode.Uri.joinPath(ctx.extensionUri, "dist", "remote").fsPath,
       settings: readSettings,
@@ -209,6 +210,9 @@ export class Host implements vscode.Disposable {
 
     cloudStatus: () => this.service.cloudStatus(),
     cloudConnect: (url, token) => this.service.cloudConnect(url, token),
+    cloudSignInStart: (url) => this.service.cloudSignInStart(url),
+    cloudSignInWait: () => this.service.cloudSignInWait(),
+    cloudSignInCancel: () => this.service.cloudSignInCancel(),
     cloudDisconnect: () => this.service.cloudDisconnect(),
     cloudWallet: () => this.service.cloudWallet(),
     cloudLedger: (limit) => this.service.cloudLedger(limit),
