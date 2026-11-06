@@ -97,6 +97,18 @@ To try an extension change without a full IDE build, run `pnpm build:dev` once, 
 
 These are deferred per the blueprint until users show sustained demand: cloud providers beyond RunPod, idle shutdown, team sync and control plane, automatic AI run analysis, gradient/profiler instrumentation, a dataset workbench, and deployment.
 
+## Privacy
+
+Converlt sends nothing to us unless you sign in to a Converlt account; telemetry is off. See the [privacy policy](docs/PRIVACY.md).
+
+## Code signing
+
+The Microsoft Store edition is signed by Microsoft. The zip on the Releases page isn't signed yet, so Windows may show "Windows protected your PC" the first time; choose More info → Run anyway.
+
+Releases are built from tagged commits of this repository. Team roles:
+
+- Author, reviewer and approver: [Sehastrajit-S](https://github.com/Sehastrajit-S)
+
 ## License
 
 Converlt is open source under the [Apache License 2.0](LICENSE): the IDE, its extension, the run protocol, the remote agent and the Python SDK. The IDE is built from [Code - OSS](https://github.com/microsoft/vscode), which is MIT licensed; see [NOTICE](NOTICE).

@@ -1,0 +1,15 @@
+diff --git a/src/vs/platform/dialogs/electron-browser/dialog.ts b/src/vs/platform/dialogs/electron-browser/dialog.ts
+index 71d2a8a9..ec745b23 100644
+--- a/src/vs/platform/dialogs/electron-browser/dialog.ts
++++ b/src/vs/platform/dialogs/electron-browser/dialog.ts
+@@ -15,7 +15,9 @@ function formatCopilotVersion(version: string | undefined): string {
+ }
+ 
+ export function createNativeAboutDialogDetails(productService: IProductService, osProps: IOSProperties): { title: string; details: string; detailsToCopy: string } {
+-	let version = productService.version;
++	// Converlt: its own version first; the Code - OSS version stays the engine version extensions check.
++	const converltVersion = (productService as { converltVersion?: string }).converltVersion;
++	let version = converltVersion ? `${converltVersion} (Code - OSS ${productService.version})` : productService.version;
+ 	if (productService.target) {
+ 		version = `${version} (${productService.target} setup)`;
+ 	} else if (productService.darwinUniversalAssetId) {

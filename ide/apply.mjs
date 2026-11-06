@@ -37,6 +37,8 @@ for (const [k, v] of Object.entries(overrides)) {
   if (v === null) delete product[k];
   else product[k] = v;
 }
+// Converlt's own version (root package.json): shown in About and used for the Store package.
+product.converltVersion = JSON.parse(await readFile(path.join(ide, "..", "package.json"), "utf8")).version;
 await writeFile(productPath, JSON.stringify(product, null, "\t") + "\n");
 console.log("product.json: branded as", product.nameLong);
 
