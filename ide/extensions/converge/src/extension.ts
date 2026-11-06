@@ -38,6 +38,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
 
   ctx.subscriptions.push(h, panels, runsView, computeView, cloudView, creditsItem, problems, status);
   ctx.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: "python", scheme: "file" }, codeLens));
+  offerPythonSupport(ctx);
 
   // Converlt Cloud models in the chat model picker, and the Converlt assistant as the default chat.
   const models = new ConverltModels(h);
@@ -195,10 +196,10 @@ Click to open your wallet`;
     const plan = await h.service.planReproduce(runId);
     const pick = await vscode.window.showWarningMessage(
       `Reproduce ${h.service.getRun(runId)?.manifest.name}?`,
-      { modal: true, detail: plan.warnings.map((w) => `• ${w}`).join("\n") },
+      { modal: true, detail: [plan.code.detail, ...plan.warnings].map((w) => `• ${w}`).join("\n") },
       "Reproduce",
     );
-    if (pick) await launchFlow(h, panels, undefined, { command: plan.command, machineId: plan.machineId, options: plan.options, reproducedFrom: runId });
+    if (pick) await launchFlow(h, panels, undefined, { command: plan.command, machineId: plan.machineId, options: plan.options, reproducedFrom: runId, exactCode: plan.code.mode === "exact" });
   });
   reg("converge.reconnectRun", (item?: RunItem | string) => {
     const [runId] = runIdsFrom(item);
@@ -253,6 +254,7 @@ Click to open your wallet`;
     panels.open({ view: "builder", importFile: rel });
   });
   reg("converge.openData", () => panels.open({ view: "data" }));
+  reg("converge.openGuide", () => panels.open({ view: "guide" }));
   reg("converge.openHub", (machineId?: unknown) => panels.open({ view: "hub", machineId: typeof machineId === "string" ? machineId : null }));
   reg("converge.openEnvironments", (machineId?: unknown) => panels.open({ view: "envs", machineId: typeof machineId === "string" ? machineId : null }));
   reg("converge.cloudSignIn", async () => {
@@ -388,6 +390,8 @@ interface LaunchPrefill {
   machineId?: string | null;
   options?: ReturnType<typeof readSettings>["defaultOptions"];
   reproducedFrom?: string;
+  /** Reproduce with the run's exact code (its commit and changes, checked out separately). */
+  exactCode?: boolean;
 }
 
 async function pickMachine(h: Host, title: string, preferId?: string | null): Promise<Machine | undefined> {
@@ -461,7 +465,7 @@ async function launchFlow(h: Host, panels: Panels, file?: vscode.Uri, prefill: L
           } else progress.report({ message: p.detail });
         });
       });
-      const res = await h.service.launchRun({ machineId: machine.id, command: command!, options, reproducedFrom: prefill.reproducedFrom });
+      const res = await h.service.launchRun({ machineId: machine.id, command: command!, options, reproducedFrom: prefill.reproducedFrom, exactCode: prefill.exactCode });
       runId = res.runId;
       panels.open({ view: "run", runId: res.runId });
       await done;
@@ -647,4 +651,35 @@ function throttle(fn: () => void, ms: number): () => void {
       fn();
     }, ms);
   };
+}
+
+// ---------------------------------------------------------------- Python language support
+
+/** Python language support from Open VSX (Pylance is licensed for Microsoft's VS Code only). */
+const PYTHON_EXTENSIONS = ["detachhead.basedpyright", "ms-python.python"];
+const PYTHON_OFFER_KEY = "converge.pythonSupportOffered";
+
+/** Once, when a Python file opens and no Python extension is installed: offers to install them. */
+function offerPythonSupport(ctx: vscode.ExtensionContext): void {
+  const has = () => ["detachhead.basedpyright", "ms-pyright.pyright", "ms-python.python", "ms-python.vscode-pylance"].some((id) => vscode.extensions.getExtension(id));
+  if (ctx.globalState.get<boolean>(PYTHON_OFFER_KEY) || has()) return;
+  const check = async (doc: vscode.TextDocument) => {
+    if (doc.languageId !== "python" || ctx.globalState.get<boolean>(PYTHON_OFFER_KEY) || has()) return;
+    await ctx.globalState.update(PYTHON_OFFER_KEY, true);
+    const pick = await vscode.window.showInformationMessage(
+      "Install Python language support? It adds completions, type checking, go-to-definition and debugging (basedpyright and the Python extension, from Open VSX).",
+      "Install",
+      "Not now",
+    );
+    if (pick !== "Install") return;
+    for (const id of PYTHON_EXTENSIONS) {
+      try {
+        await vscode.commands.executeCommand("workbench.extensions.installExtension", id);
+      } catch (e) {
+        void vscode.window.showWarningMessage(`Couldn't install ${id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  };
+  ctx.subscriptions.push(vscode.workspace.onDidOpenTextDocument((d) => void check(d)));
+  for (const d of vscode.workspace.textDocuments) void check(d);
 }

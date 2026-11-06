@@ -15,6 +15,10 @@ import type {
   DataProfile,
   ImportSummary,
   RunSummary,
+  JobEstimate,
+  SweepValues,
+  Cause,
+  SharedFrom,
 } from "@converge/run-protocol";
 import type { CloudPod, CloudStatus, GpuOffer, LaunchPodRequest, LedgerEntry, ModelInfo, SpendLimits, WalletSummary } from "./cloudApi.ts";
 
@@ -134,6 +138,8 @@ export interface RunView {
   costUsd: number | null;
   effectiveConfig: Record<string, unknown>;
   hasPatch: boolean;
+  /** For a reproduction that finished: whether it got the original's result. */
+  reproduction: ReproductionCheck | null;
 }
 
 export interface SyncPlanView {
@@ -150,6 +156,20 @@ export interface LaunchRequest {
   command: string;
   options: RunOptions;
   reproducedFrom?: string;
+  /** With reproducedFrom: run the exact code of that run (its commit plus its uncommitted changes), not the current files. */
+  exactCode?: boolean;
+  /** Python to run with instead of the machine's (e.g. an environment rebuilt for a reproduction). */
+  python?: string;
+}
+
+/** A dataset a run used, for reproducing it. */
+export interface ReproData {
+  name: string;
+  /** Where it was on the original machine. */
+  path: string;
+  /** Where it was downloaded from, when known: the training script fetches it again if it's missing. */
+  source: { hub: "huggingface" | "kaggle"; id: string } | null;
+  fingerprint: string | null;
 }
 
 export interface ReproducePlan {
@@ -157,6 +177,48 @@ export interface ReproducePlan {
   machineId: string | null;
   options: RunOptions;
   warnings: string[];
+  /** How the code is reproduced. "current": the files as they are now; "exact": the run's commit plus its changes. */
+  code: { mode: "current" | "exact" | "unknown"; commit: string | null; changes: boolean; available: boolean; detail: string };
+  data: ReproData[];
+  /** The original Python environment. */
+  env: { python: string | null; torch: string | null; cuda: string | null; gpu: string | null; packages: number };
+  /** Set for a run someone shared. */
+  shared: SharedFrom | null;
+}
+
+/** Whether a reproduction got the original run's result, checked when it finishes. */
+export interface ReproductionCheck {
+  at: number;
+  originalRunId: string;
+  originalName: string;
+  verdict: "reproduced" | "differs" | "unknown";
+  metric: string | null;
+  original: number | null;
+  reproduction: number | null;
+  gapPct: number | null;
+  noisePct: number | null;
+  /** Likely reasons when it differs, most likely first. */
+  causes: Cause[];
+  /** What was checked and found the same, e.g. "Code", "Data". */
+  same: string[];
+  notes: string[];
+}
+
+/** A run packed into one file (.converlt-run) to send to someone else. */
+export interface SharedRunFile {
+  format: "converlt-run";
+  version: 1;
+  exportedAt: number;
+  by: string;
+  project: string;
+  remote: string | null;
+  manifest: RunManifest;
+  notes: RunNotes;
+  /** events.jsonl as written. */
+  events: string;
+  /** The run's uncommitted changes (code.patch), if it had any. */
+  patch: string | null;
+  data: ReproData[];
 }
 
 // ------------------------------------------------------------ environments
@@ -308,6 +370,45 @@ export interface DataCodePaths {
   loaderPath: string;
 }
 
+// ------------------------------------------------------------ sweeps and estimates
+
+export interface SweepRequest {
+  /** The base command; each run gets the swept values written into it. */
+  command: string;
+  /** Values per option, or the text form ("lr = 1e-4..1e-2 x4 log"). */
+  values: SweepValues | string;
+  mode?: "grid" | "random";
+  /** Most runs; a larger grid is refused. Default 24. */
+  max?: number;
+  /** Machines to spread the runs over; default: the best machine for the job. */
+  machineIds?: string[];
+  /** Runs at once per machine (the rest wait their turn). Default 1. */
+  perMachine?: number;
+  /** Groups the runs in the run list and in reports. */
+  name?: string;
+  /** Run options for every run; default: the settings' defaults. */
+  options?: RunOptions;
+}
+
+export interface SweepInfo {
+  name: string;
+  total: number;
+  started: string[];
+  running: number;
+  queued: number;
+  errors: string[];
+}
+
+export interface JobEstimateResult {
+  estimate: JobEstimate | null;
+  /** Machines ranked for this job, best first. */
+  machines: { machineId: string; name: string; seconds: number | null; fits: boolean; cost: number | null; reason: string }[];
+  recommendedMachineId: string | null;
+  /** Why there's no estimate, if there isn't one. */
+  note: string | null;
+}
+
+
 // ------------------------------------------------------------ model builder
 
 export interface BuilderDesign {
@@ -407,12 +508,27 @@ export interface ConvergeApi {
   reconnectRun(runId: string): Promise<void>;
   saveNotes(runId: string, notes: RunNotes): Promise<void>;
   planReproduce(runId: string): Promise<ReproducePlan>;
+  /** Builds a Python environment on a machine from the packages a run recorded; returns its Python. */
+  reproduceEnv(runId: string, machineId: string): Promise<{ python: string; created: boolean; log: string }>;
+  /** Saves a run to a .converlt-run file (asks where) to send to someone; null if cancelled. */
+  shareRun(runId: string): Promise<{ path: string } | null>;
+  /** Opens a .converlt-run file someone sent (asks which); null if cancelled. */
+  openSharedRun(): Promise<{ runId: string; existed: boolean } | null>;
   openPatch(runId: string): Promise<void>;
   gitDiff(fromCommit: string, toCommit: string): Promise<string>;
   /** Why `otherRunId` turned out differently from `baseRunId`: the gap, where they split, and ranked causes. */
   explainRuns(baseRunId: string, otherRunId: string): Promise<RunExplanation>;
   /** The same, worded by an AI model through Converlt Cloud (costs credits). */
   explainRunsWithAi(baseRunId: string, otherRunId: string): Promise<ModelReply & { model: string }>;
+  /** GPU memory and time a job should need, and the machines ranked for it (a builder design, or a command with earlier runs). */
+  estimateJob(req: { command?: string; graph?: ModelGraph; batch?: number }): Promise<JobEstimateResult>;
+  /** One command over several settings, each its own run, queued per machine. */
+  launchSweep(req: SweepRequest): Promise<SweepInfo>;
+  listSweeps(): Promise<SweepInfo[]>;
+  /** Drops a sweep's waiting runs. */
+  cancelSweep(name: string): Promise<void>;
+  /** Writes the experiment report to reports/ and opens it in the editor. */
+  writeReport(req: { runIds?: string[]; group?: string; metric?: string }): Promise<{ path: string }>;
 
   updateSettings(patch: Partial<Settings>): Promise<Settings>;
   /** Sends a test message to an ntfy topic URL, from this computer. */

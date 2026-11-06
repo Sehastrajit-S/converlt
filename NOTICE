@@ -1,0 +1,48 @@
+Converlt
+Copyright 2026 The Converlt authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+-------------------------------------------------------------------------------
+Code - OSS
+
+The Converlt IDE is built from Code - OSS (https://github.com/microsoft/vscode),
+which is fetched at build time and patched by the files in ide/. Code - OSS is
+licensed under the MIT License:
+
+  MIT License
+
+  Copyright (c) 2015 - present Microsoft Corporation
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+Converlt is not affiliated with or endorsed by Microsoft. "Visual Studio Code"
+and "VS Code" are trademarks of Microsoft Corporation and are not used for this
+product. Converlt uses the Open VSX registry (https://open-vsx.org), not the
+Visual Studio Marketplace, and does not include Microsoft extensions that are
+licensed only for Microsoft's builds (such as Pylance, Remote - SSH, Live Share
+or GitHub Copilot).
+
+-------------------------------------------------------------------------------
+Third-party packages
+
+The extension and its webview bundle open-source npm packages (including React,
+lucide-react and esbuild output of the packages listed in each package.json).
+Each keeps its own license, found in its folder under node_modules. The
+converge-defaults themes are MIT licensed.

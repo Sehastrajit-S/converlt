@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
-import { Code, FlaskConical, GitCompare, OctagonAlert, Play, Search, TriangleAlert } from "lucide-react";
-import type { AppState, RunListItem } from "@converge/core/api";
-import { api } from "../api.ts";
+import { useEffect, useMemo, useState } from "react";
+import { Code, FileText, FolderInput, FlaskConical, GitCompare, Layers, LoaderCircle, OctagonAlert, Play, Search, TriangleAlert } from "lucide-react";
+import type { AppState, RunListItem, SweepInfo } from "@converge/core/api";
+import { api, errorMessage } from "../api.ts";
 import { Sparkline } from "../components/Chart.tsx";
-import { Empty, Segmented, StatusPill } from "../components/ui.tsx";
+import { Empty, Segmented, StatusPill, useToast } from "../components/ui.tsx";
 import { formatDuration, formatNumber, formatUsd, shortCommit, timeAgo } from "../format.ts";
 
 type Filter = "all" | "active" | "failed" | "completed";
@@ -29,7 +29,38 @@ export function Runs({
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [sweeps, setSweeps] = useState<SweepInfo[]>([]);
+  const [reporting, setReporting] = useState(false);
+  const toast = useToast();
   const project = state.project!;
+
+  // Sweeps change as their runs finish, so follow the run list.
+  useEffect(() => {
+    api.listSweeps().then(setSweeps, () => setSweeps([]));
+  }, [runs]);
+
+  const openShared = async () => {
+    try {
+      const r = await api.openSharedRun();
+      if (!r) return;
+      if (r.existed) toast("info", "Already in your runs", "That run was opened before.");
+      onOpen(r.runId);
+    } catch (e) {
+      toast("error", "Couldn't open the run file", errorMessage(e));
+    }
+  };
+
+  /** Writes the experiment report (ranked runs, the best one, mistakes, next steps) and opens it. */
+  const report = async (req: { runIds?: string[]; group?: string }) => {
+    setReporting(true);
+    try {
+      await api.writeReport(req);
+    } catch (e) {
+      toast("error", "Couldn't write the report", errorMessage(e));
+    } finally {
+      setReporting(false);
+    }
+  };
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -71,10 +102,48 @@ export function Runs({
             <Code size={15} /> Open in editor
           </button>
         )}
+        <button className="btn" onClick={openShared} title="Open a .converlt-run file a teammate sent, to see and reproduce their run">
+          <FolderInput size={15} /> Open shared run
+        </button>
+        {runs.length > 0 && (
+          <button className="btn" disabled={reporting} onClick={() => report({})} title="Rank the latest runs, show the best one, its mistakes, and what to try next">
+            {reporting ? <LoaderCircle size={15} className="spin" /> : <FileText size={15} />} Report
+          </button>
+        )}
         <button className="btn primary" onClick={onNewRun}>
           <Play size={14} fill="currentColor" /> New run
         </button>
       </div>
+
+      {sweeps.map((sw) => {
+        const done = sw.started.length - sw.running;
+        return (
+          <div key={sw.name} className="sweep-bar">
+            <Layers size={15} />
+            <b>{sw.name}</b>
+            <span className="faint">
+              {done} of {sw.total} done{sw.running ? ` · ${sw.running} running` : ""}
+              {sw.queued ? ` · ${sw.queued} waiting` : ""}
+              {sw.errors.length ? ` · ${sw.errors.length} couldn't start` : ""}
+            </span>
+            <div className="meter" style={{ width: 120 }}>
+              <div style={{ width: `${(done / Math.max(1, sw.total)) * 100}%` }} />
+            </div>
+            <div className="spacer" />
+            <button className="btn ghost sm" onClick={() => setQuery(sw.name)}>
+              Show runs
+            </button>
+            {sw.queued > 0 && (
+              <button className="btn ghost sm" onClick={() => void api.cancelSweep(sw.name)}>
+                Cancel waiting
+              </button>
+            )}
+            <button className="btn sm" disabled={reporting || done === 0} onClick={() => report({ group: sw.name })}>
+              <FileText size={13} /> Report
+            </button>
+          </div>
+        );
+      })}
 
       {runs.length === 0 ? (
         <div className="card">
@@ -136,7 +205,18 @@ export function Runs({
                     <td style={{ maxWidth: 420 }}>
                       <div className="run-name">
                         {r.name}
-                        {r.group && <span className="tag accent">{r.group}</span>}
+                        {r.group && (
+                          <span
+                            className="tag accent clickable-tag"
+                            title="Show this group's runs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuery(r.group);
+                            }}
+                          >
+                            {r.group}
+                          </span>
+                        )}
                         {r.diagnosticKinds.includes("nan") && (
                           <span className="tag err" title="Non-finite loss detected">
                             NaN
@@ -200,6 +280,9 @@ export function Runs({
               </span>
               <button className="btn ghost sm" onClick={() => setSelected([])}>
                 Clear
+              </button>
+              <button className="btn sm" disabled={reporting} onClick={() => report({ runIds: selected })}>
+                <FileText size={14} /> Report
               </button>
               <button className="btn primary sm" disabled={selected.length < 2} onClick={() => onCompare(selected)}>
                 <GitCompare size={14} /> Compare

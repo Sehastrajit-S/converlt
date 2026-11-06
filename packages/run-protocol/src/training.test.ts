@@ -103,6 +103,12 @@ test("training scripts read the dataset's loader: no synthetic data", () => {
   assert.match(code, /if converge and main else None/);
   assert.match(code, /device = "mps"/, "Apple silicon GPUs");
   assert.doesNotMatch(code, /torch\.randn\(|torch\.randint\(|make_batch|synthetic/, "nothing made up");
+  // After training: the test split is scored and the worst mistakes recorded.
+  assert.match(code, /def final_evaluation\(worst=8\):/);
+  assert.match(code, /"test\/accuracy"/);
+  assert.match(code, /run\.log_failures\(raw, keep_x\[mask\]/);
+  assert.match(code, /hasattr\(run, "log_failures"\)/, "older SDKs don't crash at the end");
+  assert.ok(code.indexOf("final_evaluation()") < code.indexOf("torch.save(raw.state_dict()"), "evaluated before the checkpoint is written");
   assert.throws(() => generateTrainCode(tpl("cnn"), { name: "Pets", loaderStem: "pets", spec }), /Pets gives/);
 
   const ddpm = fitToData(tpl("ddpm"), spec).graph;
@@ -114,7 +120,7 @@ test("training scripts read the dataset's loader: no synthetic data", () => {
 
 test("array loader: one file holds out validation; integer inputs stay ids", () => {
   const code = generateLoaderCode(ref({ name: "Reviews", format: "tensors", path: "/data/reviews.npz" }), tokens);
-  assert.match(code, /FILES = \{"data":"\/data\/reviews\.npz"\}/);
+  assert.match(code, /FILES = \{"data": "\/data\/reviews\.npz"\}/);
   assert.match(code, /INPUT_DTYPE = torch\.long/);
   assert.match(code, /NUM_CLASSES = 2/);
   assert.match(code, /sets\["train"\], sets\["val"\] = Subset/);

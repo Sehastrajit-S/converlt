@@ -62,7 +62,8 @@ export interface RunExplanation {
 
 // ------------------------------------------------------------ metric and outcome
 
-const lowerBetter = (key: string) => /loss|err|perplex|ppl|mse|mae|rmse|cer|wer/i.test(key);
+/** Whether a smaller value of this metric is better (losses, errors, perplexity). */
+export const lowerBetter = (key: string) => /loss|err|perplex|ppl|mse|mae|rmse|cer|wer/i.test(key);
 
 /** The metric to judge runs by: validation loss if both runs have it, else the primary metric. */
 export function targetMetric(a: RunSummary, b: RunSummary): string | null {
@@ -75,7 +76,7 @@ export function targetMetric(a: RunSummary, b: RunSummary): string | null {
 const finite = (s: MetricPoint[]) => s.filter((p): p is MetricPoint & { value: number } => p.value !== null && Number.isFinite(p.value)).sort((x, y) => x.step - y.step);
 
 /** Where a run ended up: the median of its last 10% of points (at least 5), robust to the odd spike. */
-function final(s: MetricPoint[]): number | null {
+export function finalValue(s: MetricPoint[]): number | null {
   const f = finite(s);
   if (!f.length) return null;
   const tail = f.slice(-Math.max(5, Math.ceil(f.length * 0.1))).map((p) => p.value).sort((x, y) => x - y);
@@ -330,8 +331,8 @@ export function explainRuns(a: ExplainInput, b: ExplainInput, code: CodeChanges 
   const sa = metric ? a.summary.metrics[metric]! : [];
   const sb = metric ? b.summary.metrics[metric]! : [];
   // Judge where each run ended up, not its best moment: a run that peaks and then destabilises is worse.
-  const bestA = metric ? final(sa) : null;
-  const bestB = metric ? final(sb) : null;
+  const bestA = metric ? finalValue(sa) : null;
+  const bestB = metric ? finalValue(sb) : null;
   const noiseA = metric ? noise(finite(sa)) : 0;
   const gapPct = bestA !== null && bestB !== null && bestA !== 0 ? ((lower ? bestB - bestA : bestA - bestB) / Math.abs(bestA)) * 100 : null;
   const noisePct = bestA !== null && bestA !== 0 ? (noiseA / Math.abs(bestA)) * 100 : null;

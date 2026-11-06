@@ -76,6 +76,22 @@ export interface RunManifest {
   sync: { files: number; bytes: number; skipped: number };
   options: RunOptions;
   reproducedFrom?: string;
+  /** Set on a run opened from a shared run file: whose it is and where it came from. */
+  shared?: SharedFrom;
+}
+
+/** Where a shared run came from. */
+export interface SharedFrom {
+  /** The person who shared it (their git user name). */
+  by: string;
+  /** When they exported it (Unix ms). */
+  at: number;
+  /** Their project folder's name. */
+  project: string;
+  /** Their git remote, where the run's commit can be fetched from. */
+  remote: string | null;
+  /** The run's name in their project, e.g. "run-007". */
+  originalName: string;
 }
 
 /** Subset of the manifest sent to the agent's `start` command. */
@@ -234,6 +250,24 @@ export interface ExamplesEvent extends BaseEvent {
   classNames: string[];
 }
 
+/** After training: the held-out split's examples the model gets most wrong (or, without labels to
+ *  get wrong, the ones with the highest loss), with what it predicted. */
+export interface FailuresEvent extends BaseEvent {
+  type: "failures";
+  /** "test", or "val" when there is no test split. */
+  split: string;
+  inputs: ExampleVisual[];
+  labels: ExampleLabel[];
+  predictions: ExamplePrediction[];
+  /** Each example's loss, in the same order (highest first). */
+  losses: number[];
+  shape: number[] | null;
+  classNames: string[];
+  /** Examples evaluated, and how many were wrong (null when "wrong" doesn't apply, e.g. regression). */
+  total: number;
+  wrong: number | null;
+}
+
 export interface TelemetryEvent extends BaseEvent {
   type: "telemetry";
   gpus: GpuSample[];
@@ -268,7 +302,8 @@ export type RunEvent =
   | ArtifactEvent
   | InputEvent
   | WeightsEvent
-  | ExamplesEvent;
+  | ExamplesEvent
+  | FailuresEvent;
 
 /** Lines emitted by `agent tail` that are not persisted run events. */
 export type TailControlLine =

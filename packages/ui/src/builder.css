@@ -717,3 +717,36 @@
 .layer-node .title {
   align-items: center;
 }
+
+/* run page: the evaluation after training */
+.eval-card {
+  margin-bottom: 14px;
+}
+.eval-card .card-head {
+  flex-wrap: wrap;
+}
+.eval-card .examples-strip {
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
+/* builder: memory and time to train */
+.estimate-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.estimate-bar > svg {
+  color: var(--info);
+  flex: none;
+}
+.estimate-bar > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+}

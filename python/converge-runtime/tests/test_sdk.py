@@ -246,6 +246,27 @@ class HookTest(unittest.TestCase):
         self.assertEqual(set(snaps[-1]["predictions"][0]), {"class", "p"})
 
     @unittest.skipUnless(HAVE_TORCH, "needs PyTorch")
+    def test_failures_after_training(self):
+        records, _ = self.run_script(
+            """
+            import torch, converge
+            model = torch.nn.Sequential(torch.nn.Flatten(), torch.nn.Linear(3 * 8 * 8, 3))
+            run = converge.run()
+            x, y = torch.rand(10, 3, 8, 8), torch.tensor([0, 1, 2, 0, 1, 2, 0, 1, 2, 0])
+            run.log_failures(model, x, y, losses=torch.linspace(3, 1, 10), class_names=["cat", "dog", "fox"], total=200, wrong=17)
+            """
+        )
+        f = [r for r in records if r["type"] == "failures"]
+        self.assertEqual(len(f), 1)
+        f = f[0]
+        self.assertEqual((f["split"], f["total"], f["wrong"]), ("test", 200, 17))
+        self.assertEqual(len(f["inputs"]), 8, "at most eight")
+        self.assertEqual(len(f["predictions"]), 8)
+        self.assertEqual(set(f["predictions"][0]), {"class", "p"})
+        self.assertEqual(f["losses"][0], 3.0)
+        self.assertEqual(f["labels"][1], {"class": 1, "name": "dog"})
+
+    @unittest.skipUnless(HAVE_TORCH, "needs PyTorch")
     def test_kinds_of_examples(self):
         sys.path.insert(0, SDK_DIR)
         import torch

@@ -307,6 +307,49 @@ export function dataStem(name: string): string {
 const pyList = (xs: string[]) => `[${xs.map((x) => JSON.stringify(x)).join(", ")}]`;
 
 /**
+ * A machine path as Python source. Paths in a home folder become os.path.expanduser("~/..."), so
+ * generated code works for another person (their home is /home/<them>), e.g. when a run is shared.
+ */
+export function pyPath(p: string): string {
+  const m = /^\/(?:home\/[^/]+|root|Users\/[^/]+)(\/.*)?$/.exec(p);
+  return m ? `os.path.expanduser(${JSON.stringify("~" + (m[1] ?? ""))})` : JSON.stringify(p);
+}
+
+/**
+ * Python that downloads a dataset again when it isn't on the machine (someone else's machine, a new
+ * cloud pod), from where Datasets & models got it. Empty when the source isn't known.
+ */
+export function fetchDataCode(d: DatasetRef): string[] {
+  const src = d.source;
+  if (!src) return [];
+  if (src.hub === "huggingface") {
+    const i = d.path.indexOf(`/${src.id}`);
+    const root = i >= 0 ? d.path.slice(0, i + src.id.length + 1) : d.path;
+    return [
+      `def fetch_data():`,
+      `    """Downloads ${src.id} from Hugging Face, where it came from, when it isn't on this machine."""`,
+      `    from huggingface_hub import snapshot_download`,
+      `    print("Downloading ${src.id} from Hugging Face (not on this machine yet)", flush=True)`,
+      `    snapshot_download(repo_id=${JSON.stringify(src.id)}, repo_type="dataset", local_dir=${pyPath(root)})`,
+      ``,
+      ``,
+    ];
+  }
+  const i = d.path.indexOf(`/datasets/${src.id}`);
+  if (i < 0) return [];
+  return [
+    `def fetch_data():`,
+    `    """Downloads ${src.id} from Kaggle, where it came from, when it isn't on this machine."""`,
+    `    os.environ.setdefault("KAGGLEHUB_CACHE", ${pyPath(d.path.slice(0, i))})`,
+    `    import kagglehub`,
+    `    print("Downloading ${src.id} from Kaggle (not on this machine yet)", flush=True)`,
+    `    kagglehub.dataset_download(${JSON.stringify(src.id)})`,
+    ``,
+    ``,
+  ];
+}
+
+/**
  * Where the processed files go on the machine: <name>_processed/ beside the input, never inside
  * it (a folder dataset would otherwise read its own output back in as more data).
  */
@@ -351,14 +394,16 @@ export function generatePreprocessCode(d: DatasetRef): string {
     `    converge = None`,
     ``,
     `p = argparse.ArgumentParser()`,
-    `p.add_argument("--input", default=${JSON.stringify(d.path)})`,
-    `p.add_argument("--output", default=${JSON.stringify(processedDir(d))})`,
+    `p.add_argument("--input", default=${pyPath(d.path)})`,
+    `p.add_argument("--output", default=${pyPath(processedDir(d))})`,
     `p.add_argument("--preview", type=int, default=0)`,
     `a = p.parse_args()`,
     `TARGET = ${d.target ? JSON.stringify(d.target) : "None"}`,
     ``,
     ``,
+    ...fetchDataCode(d),
     `def load(path, nrows=None):`,
+    ...(d.source ? [`    if not os.path.exists(path):`, `        fetch_data()`] : []),
     `    # Converlt's own outputs (<name>_processed folders, preprocess_state.json) are never input data.`,
     `    files = [path] if os.path.isfile(path) else sorted(f for f in glob.glob(os.path.join(path, "**", "*"), recursive=True) if f.lower().endswith((".csv", ".tsv", ".parquet", ".pq", ".jsonl", ".ndjson", ".json")) and not any(part.endswith("_processed") for part in os.path.relpath(f, path).split(os.sep)) and os.path.basename(f) != "preprocess_state.json")`,
     `    frames = []`,
@@ -559,7 +604,7 @@ export function generateLoaderCode(d: DatasetRef, p?: DataProfile | null): strin
       `from torch.utils.data import DataLoader, Subset`,
       `from torchvision import datasets, transforms`,
       ``,
-      `ROOT = ${JSON.stringify(d.path)}`,
+      `ROOT = ${pyPath(d.path)}`,
       `SIZE = ${resize}`,
       `INPUT_SHAPE = (3, SIZE, SIZE)`,
       `NUM_CLASSES = ${classes ?? "None  # set after profiling"}`,
@@ -568,7 +613,9 @@ export function generateLoaderCode(d: DatasetRef, p?: DataProfile | null): strin
       `EVAL_TRANSFORM = transforms.Compose([${evalT.join(", ")}])`,
       ``,
       ``,
+      ...fetchDataCode(d),
       `def make_loaders(batch_size=64, num_workers=None, val_fraction=0.1, seed=0):`,
+      ...(d.source ? [`    if not os.path.isdir(ROOT):`, `        fetch_data()`] : []),
       `    # Loading and decoding images is CPU work: parallel workers keep the GPU fed.`,
       `    workers = num_workers if num_workers is not None else min(8, max(2, (os.cpu_count() or 4) // 2))`,
       `    kw = dict(batch_size=batch_size, num_workers=workers, pin_memory=torch.cuda.is_available(), persistent_workers=workers > 0)`,
@@ -607,7 +654,7 @@ export function generateLoaderCode(d: DatasetRef, p?: DataProfile | null): strin
     `import torch`,
     `from torch.utils.data import DataLoader, TensorDataset`,
     ``,
-    `DATA_DIR = ${JSON.stringify(processedDir(d))}`,
+    `DATA_DIR = ${pyPath(processedDir(d))}`,
     `TARGET = ${target ? JSON.stringify(target) : "None"}`,
     `TASK = ${JSON.stringify(classification ? "classification" : "regression")}`,
     ``,
@@ -653,6 +700,13 @@ export function generateLoaderCode(d: DatasetRef, p?: DataProfile | null): strin
     ``,
     ``,
     `def make_loaders(batch_size=256):`,
+    `    if not os.path.isdir(DATA_DIR):  # e.g. on another machine: write the processed splits first`,
+    `        prep = os.path.join(os.path.dirname(os.path.abspath(__file__)), ${JSON.stringify(`preprocess_${stem}.py`)})`,
+    `        if os.path.exists(prep):`,
+    `            import subprocess, sys`,
+    `            print("Processed data not found at %s; running %s" % (DATA_DIR, prep), flush=True)`,
+    `            env = {k: v for k, v in os.environ.items() if k != "CONVERGE_SDK_FILE"}  # its settings aren't the run's`,
+    `            subprocess.check_call([sys.executable, prep], env=env)`,
     `    # The data is already in memory as tensors, so worker processes would only add overhead.`,
     `    loaders, names = {}, class_names()`,
     `    for split in ("train", "val", "test", "data"):`,
@@ -677,11 +731,12 @@ function tensorLoaderCode(d: DatasetRef, p: TensorProfile | null): string {
     `    loaders = make_loaders(batch_size=64)`,
     `    for x${task === "none" ? "" : ", y"} in loaders["train"]: ...`,
     `"""`,
+    `import os`,
     `import numpy as np`,
     `import torch`,
     `from torch.utils.data import DataLoader, Subset, TensorDataset`,
     ``,
-    `FILES = ${JSON.stringify(files)}`,
+    `FILES = {${Object.entries(files).map(([k, v]) => `${JSON.stringify(k)}: ${pyPath(v)}`).join(", ")}}`,
     `X_KEY = ${JSON.stringify(p?.keys.x ?? "x")}`,
     `Y_KEY = ${p?.keys.y ? JSON.stringify(p.keys.y) : "None"}`,
     `INPUT_SHAPE = (${(p?.x.shape ?? []).join(", ")}${p?.x.shape.length === 1 ? "," : ""})`,

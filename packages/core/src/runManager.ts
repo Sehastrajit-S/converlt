@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import {
+  EMPTY_NOTES,
   PROTOCOL_VERSION,
+  parseEventLines,
+  processedDir,
+  type DatasetRef,
   applyEvent,
   displayStatus,
   downsample,
@@ -20,9 +24,9 @@ import {
   type RunStatus,
   type RunSummary,
 } from "@converge/run-protocol";
-import type { LaunchRequest, ReproducePlan, RunListItem, RunView, SyncPlanView } from "./api.ts";
+import type { LaunchRequest, ReproData, ReproducePlan, ReproductionCheck, RunListItem, RunView, SharedRunFile, SyncPlanView } from "./api.ts";
 import { AgentClient, TailSession } from "./agentClient.ts";
-import { currentCommit, fingerprint, isGitRepo } from "./git.ts";
+import { checkoutAt, currentCommit, fingerprint, hasCommit, isGitRepo } from "./git.ts";
 import { RunStore } from "./runStore.ts";
 import type { Settings } from "./api.ts";
 import { createTarStream, makeRules, planSync } from "./sync.ts";
@@ -38,6 +42,7 @@ interface RunRecord {
   tail: TailSession | null;
   pendingWrite: RunEvent[];
   hasPatch: boolean;
+  reproduction: ReproductionCheck | null;
 }
 
 export interface RunManagerHooks {
@@ -89,13 +94,14 @@ export class RunManager {
     for (const runId of await this.store.listRunIds()) {
       const manifest = await this.store.readManifest(runId);
       if (!manifest) continue;
-      const [events, local, notes, hasPatch] = await Promise.all([
+      const [events, local, notes, hasPatch, reproduction] = await Promise.all([
         this.store.readEvents(runId),
         this.store.readLocal(runId),
         this.store.readNotes(runId),
         this.store.hasPatch(runId),
+        this.store.readJson<ReproductionCheck>(runId, "reproduction.json"),
       ]);
-      this.runs.set(runId, { manifest, local, notes, summary: summarize(events), connection: "idle", tail: null, pendingWrite: [], hasPatch });
+      this.runs.set(runId, { manifest, local, notes, summary: summarize(events), connection: "idle", tail: null, pendingWrite: [], hasPatch, reproduction });
       this.lastNumber = Math.max(this.lastNumber, manifest.number);
     }
     // Resume observation of anything that may still be running.
@@ -280,6 +286,7 @@ export class RunManager {
       costUsd,
       effectiveConfig: { ...r.manifest.hyperparameters, ...s.config },
       hasPatch: r.hasPatch,
+      reproduction: r.reproduction,
     };
   }
 
@@ -300,14 +307,17 @@ export class RunManager {
 
   async launch(req: LaunchRequest, machine: Machine): Promise<{ runId: string }> {
     const st = this.settings();
+    // A reproduction with the exact code runs from a checkout of that code, in its own folder on the machine.
+    const codeDir = req.exactCode && req.reproducedFrom ? await this.prepareCode(req.reproducedFrom) : null;
+    const source = codeDir ?? this.projectPath;
     const runId = makeRunId();
     this.lastNumber = Math.max(this.lastNumber, await this.store.nextNumber() - 1) + 1;
     const number = this.lastNumber;
     const progress = (stage: string, detail?: string) => this.hooks.onLaunchProgress({ runId, stage, detail });
 
     const [git, plan] = await Promise.all([
-      fingerprint(this.projectPath),
-      planSync(this.projectPath, makeRules(st.syncExclude, st.maxFileSizeMB)),
+      fingerprint(source),
+      planSync(source, makeRules(st.syncExclude, st.maxFileSizeMB)),
     ]);
     const machineRef: MachineRef = {
       id: machine.id,
@@ -331,7 +341,7 @@ export class RunManager {
       hyperparameters: parseCliHyperparameters(req.command),
       framework: "pytorch",
       machine: machineRef,
-      workdir: this.workdir(),
+      workdir: codeDir ? `${this.workdir()}-repro-${req.reproducedFrom!.slice(-8)}` : this.workdir(),
       git: git?.fp ?? null,
       sync: { files: plan.files.length, bytes: plan.bytes, skipped: plan.skipped.length },
       options: req.options,
@@ -349,6 +359,7 @@ export class RunManager {
       tail: null,
       pendingWrite: [],
       hasPatch: !!git?.patch,
+      reproduction: null,
     });
     this.markChanged(runId);
 
@@ -368,7 +379,7 @@ export class RunManager {
           project: manifest.project,
           command: manifest.command,
           workdir: manifest.workdir,
-          python: machine.python,
+          python: req.python ?? machine.python,
           env: {},
           options: manifest.options,
         });
@@ -411,24 +422,142 @@ export class RunManager {
     this.markChanged(runId);
   }
 
-  async planReproduce(runId: string, machines: Machine[]): Promise<ReproducePlan> {
+  /** Datasets a run used: from a shared run's file, else its fingerprinted inputs matched to the project's Data list. */
+  async runData(runId: string, projectData: DatasetRef[]): Promise<ReproData[]> {
+    const r = this.runs.get(runId);
+    if (!r) return [];
+    const stored = await this.store.readJson<ReproData[]>(runId, "data.json");
+    if (stored) return stored;
+    const inputs = r.summary.inputs.filter((i) => i.kind === "dataset");
+    return inputs.map((i) => {
+      const ref = projectData.find((d) => d.path === i.path || processedDir(d) === i.path || d.name === i.name);
+      return { name: ref?.name ?? i.name, path: ref?.path ?? i.path ?? i.name, source: ref?.source ?? null, fingerprint: i.fingerprint ?? null };
+    });
+  }
+
+  async planReproduce(runId: string, machines: Machine[], projectData: DatasetRef[] = []): Promise<ReproducePlan> {
     const r = this.runs.get(runId);
     if (!r) throw new Error("Unknown run");
     const m = r.manifest;
     const warnings: string[] = [];
-    const head = (await isGitRepo(this.projectPath)) ? await currentCommit(this.projectPath) : null;
-    if (m.git?.commit && head && head !== m.git.commit)
-      warnings.push(`Your checkout is at ${head.slice(0, 8)}, but the run used ${m.git.commit.slice(0, 8)}. Check out that commit for an exact reproduction.`);
-    if (m.git?.dirty) warnings.push("The original run had uncommitted changes. They are saved in its code.patch; apply them before reproducing.");
-    if (!m.git) warnings.push("The original run was not in a git repository, so its exact code version is unknown.");
+    const repo = await isGitRepo(this.projectPath);
+    const head = repo ? await currentCommit(this.projectPath) : null;
+    const now = repo ? await fingerprint(this.projectPath) : null;
+
+    // Code: the exact code (commit + changes, in a separate checkout) whenever the files differ now.
+    let code: ReproducePlan["code"];
+    if (!m.git?.commit) {
+      code = { mode: "unknown", commit: null, changes: false, available: false, detail: "The run wasn't in a git repository, so its exact code isn't known. Your current files are used." };
+    } else if (!repo) {
+      code = { mode: "unknown", commit: m.git.commit, changes: m.git.dirty, available: false, detail: "This project isn't a git repository, so the run's commit can't be checked out. Your current files are used." };
+    } else if (head === m.git.commit && !m.git.dirty && !now?.fp.dirty) {
+      code = { mode: "current", commit: m.git.commit, changes: false, available: true, detail: `Your files are exactly the run's code (commit ${m.git.commit.slice(0, 8)}).` };
+    } else {
+      const here = await hasCommit(this.projectPath, m.git.commit);
+      const changes = m.git.dirty ? (r.hasPatch ? " plus its uncommitted changes" : " (its uncommitted changes weren't saved)") : "";
+      code = {
+        mode: "exact",
+        commit: m.git.commit,
+        changes: m.git.dirty && r.hasPatch,
+        available: here || !!m.shared?.remote,
+        detail: `Checks out commit ${m.git.commit.slice(0, 8)}${changes} in a separate folder; your own files aren't touched.${here ? "" : " The commit isn't in your repository yet: Converlt fetches it first."}`,
+      };
+      if (m.git.dirty && !r.hasPatch) warnings.push("The original run had uncommitted changes that weren't saved, so its exact code can't be rebuilt.");
+    }
+
     const machine = machines.find((x) => x.id === m.machine.id) ?? null;
-    if (!machine) warnings.push(`The original machine (${m.machine.name}) is no longer registered. Pick another machine; results may differ on different hardware.`);
-    const datasets = r.summary.inputs.filter((i) => i.kind === "dataset" && i.fingerprint);
-    if (datasets.length)
-      warnings.push(`The original run's data is fingerprinted (${datasets.map((d) => d.name).join(", ")}). Compare the reproduction with it afterwards: a data change shows up as a cause.`);
-    else
-      warnings.push("The original run recorded no dataset fingerprint, so a data change wouldn't be noticed. Hugging Face load_dataset is recorded automatically; for local data, call run.log_dataset(path).");
-    warnings.push("GPU kernels and data loading may be nondeterministic unless the script seeds and enables deterministic algorithms.");
-    return { command: m.command, machineId: machine?.id ?? null, options: m.options, warnings };
+    const gpu = r.summary.env?.gpus?.[0]?.name ?? null;
+    if (!machine) warnings.push(`It ran on ${m.shared ? `${m.shared.by}'s` : "a"} machine${gpu ? ` with ${gpu}` : ""}${m.shared ? "" : " that's no longer registered"}. On other hardware, results can differ slightly.`);
+
+    const data = await this.runData(runId, projectData);
+    if (!data.length) warnings.push("The run recorded no dataset, so a change in the data wouldn't be noticed. Scripts from Model Builder record it; in your own, call converge.log_dataset(path).");
+    else for (const d of data.filter((x) => !x.source)) warnings.push(`${d.name} has no download source recorded: it must already be at ${d.path} on the machine.`);
+    warnings.push("Results can still vary a little between runs unless the script fixes its random seeds and uses deterministic GPU kernels.");
+
+    const env = r.summary.env;
+    return {
+      command: m.command,
+      machineId: machine?.id ?? null,
+      options: m.options,
+      warnings,
+      code,
+      data,
+      env: { python: env?.python ?? null, torch: env?.torch ?? null, cuda: env?.torchCuda ?? env?.cudaVersion ?? null, gpu, packages: env?.packages?.length ?? 0 },
+      shared: m.shared ?? null,
+    };
+  }
+
+  /** A checkout of a run's exact code (commit plus its saved changes) in .converge/repro/<runId>. */
+  async prepareCode(runId: string): Promise<string> {
+    const r = this.runs.get(runId);
+    if (!r?.manifest.git?.commit) throw new Error("This run has no recorded commit, so its exact code can't be checked out.");
+    const dir = path.join(this.store.root, "repro", runId);
+    const patch = r.hasPatch ? await this.store.readText(runId, "code.patch") : null;
+    await checkoutAt(this.projectPath, dir, r.manifest.git.commit, patch);
+    return dir;
+  }
+
+  /** The packages a run's Python had (pip freeze lines). */
+  runPackages(runId: string): string[] {
+    return this.runs.get(runId)?.summary.env?.packages ?? [];
+  }
+
+  /** Packs a finished run into a file someone else can open and reproduce. */
+  async exportRun(runId: string, info: { by: string; remote: string | null; data: ReproData[] }): Promise<SharedRunFile> {
+    const r = this.runs.get(runId);
+    if (!r) throw new Error("Unknown run");
+    if (!r.summary.status || !isTerminal(r.summary.status)) throw new Error("Share the run once it has finished.");
+    this.flushWrites();
+    return {
+      format: "converlt-run",
+      version: 1,
+      exportedAt: Date.now(),
+      by: info.by,
+      project: path.basename(this.projectPath),
+      remote: info.remote,
+      manifest: r.manifest,
+      notes: r.notes,
+      events: (await this.store.readText(runId, "events.jsonl")) ?? "",
+      patch: r.hasPatch ? await this.store.readText(runId, "code.patch") : null,
+      data: info.data,
+    };
+  }
+
+  /** Adds a shared run to this project's runs. Opening the same file twice keeps one copy. */
+  async importRun(f: SharedRunFile): Promise<{ runId: string; existed: boolean }> {
+    if (f?.format !== "converlt-run" || f.version !== 1 || !f.manifest?.runId) throw new Error("This isn't a Converlt run file, or it's from a newer version of Converlt.");
+    const runId = f.manifest.runId;
+    this.store.runDir(runId); // validates the id
+    if (this.runs.has(runId)) return { runId, existed: true };
+    const by = String(f.by || "someone").replace(/[^\w .@-]+/g, "").slice(0, 40) || "someone";
+    const manifest: RunManifest = {
+      ...f.manifest,
+      number: 0,
+      name: `${by}/${f.manifest.shared?.originalName ?? f.manifest.name}`,
+      shared: f.manifest.shared ?? { by, at: f.exportedAt, project: f.project, remote: f.remote, originalName: f.manifest.name },
+    };
+    const data = Array.isArray(f.data) ? f.data : [];
+    await this.store.importRun(manifest, f.events ?? "", { ...EMPTY_NOTES, ...f.notes }, f.patch ?? null, data);
+    this.runs.set(runId, {
+      manifest,
+      local: null,
+      notes: { ...EMPTY_NOTES, ...f.notes },
+      summary: summarize(parseEventLines(f.events ?? "")),
+      connection: "idle",
+      tail: null,
+      pendingWrite: [],
+      hasPatch: !!f.patch,
+      reproduction: null,
+    });
+    this.markChanged(runId);
+    return { runId, existed: false };
+  }
+
+  async setReproduction(runId: string, check: ReproductionCheck): Promise<void> {
+    const r = this.runs.get(runId);
+    if (!r) return;
+    r.reproduction = check;
+    await this.store.writeJson(runId, "reproduction.json", check);
+    this.markChanged(runId);
   }
 }

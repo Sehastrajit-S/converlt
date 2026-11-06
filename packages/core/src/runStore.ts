@@ -9,6 +9,8 @@ import { EMPTY_NOTES, parseEventLines, type LocalRunState, type RunEvent, type R
  *   local.json     launch bookkeeping before the agent owns the run
  *   notes.json     experiment intent
  *   code.patch     uncommitted diff at launch
+ *   data.json      datasets of a shared run (from its .converlt-run file)
+ *   reproduction.json  for a reproduction: whether it got the original's result
  */
 export class RunStore {
   readonly root: string;
@@ -93,6 +95,33 @@ export class RunStore {
 
   async writeNotes(runId: string, notes: RunNotes): Promise<void> {
     await writeJsonAtomic(path.join(this.runDir(runId), "notes.json"), notes);
+  }
+
+  async readText(runId: string, file: string): Promise<string | null> {
+    try {
+      return await fs.readFile(path.join(this.runDir(runId), file), "utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  async readJson<T>(runId: string, file: string): Promise<T | null> {
+    return readJson<T>(path.join(this.runDir(runId), file));
+  }
+
+  async writeJson(runId: string, file: string, data: unknown): Promise<void> {
+    await writeJsonAtomic(path.join(this.runDir(runId), file), data);
+  }
+
+  /** Writes a run that came from elsewhere (a shared run file). */
+  async importRun(manifest: RunManifest, events: string, notes: RunNotes, patch: string | null, data: unknown): Promise<void> {
+    const dir = this.runDir(manifest.runId);
+    await fs.mkdir(dir, { recursive: true });
+    if (patch) await fs.writeFile(path.join(dir, "code.patch"), patch, "utf8");
+    await fs.writeFile(path.join(dir, "events.jsonl"), events, "utf8");
+    await writeJsonAtomic(path.join(dir, "notes.json"), notes);
+    await writeJsonAtomic(path.join(dir, "data.json"), data);
+    await fs.writeFile(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
   }
 
   patchPath(runId: string): string {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Activity, Code, Copy, Database, FileCode, FolderOpen, LoaderCircle, Play, Save, Search, Trash2, Wand2, X } from "lucide-react";
+import { Activity, Code, Copy, Database, FileCode, FolderOpen, Gauge, LoaderCircle, Play, Save, Search, Trash2, Wand2, X } from "lucide-react";
 import {
   analyzeGraph,
+  fmtSeconds,
   datasetSpec,
   defaultParams,
   designDataIssues,
@@ -25,7 +26,7 @@ import {
   type ModelGraph,
   type ParamSpec,
 } from "@converge/run-protocol";
-import type { AppState, BuilderDesign, DatasetView } from "@converge/core/api";
+import type { AppState, BuilderDesign, DatasetView, JobEstimateResult } from "@converge/core/api";
 import { api, errorMessage, useRun, useRuns } from "../api.ts";
 import { StatusPill, Switch, useToast } from "../components/ui.tsx";
 import { layerWeights, LayerWeightsDetail, NodeWeights } from "../components/WeightsView.tsx";
@@ -328,6 +329,15 @@ export function ModelBuilder({ state, onTrain, onOpenData, importFile }: { state
     }
   };
 
+  // Memory and time to train, on the dataset's machine (the data lives there, so training does too).
+  const [estimate, setEstimate] = useState<JobEstimateResult | null>(null);
+  useEffect(() => {
+    if (!analysis.ok || !project) return setEstimate(null);
+    const t = setTimeout(() => api.estimateJob({ graph }).then(setEstimate, () => setEstimate(null)), 500);
+    return () => clearTimeout(t);
+  }, [graph, analysis.ok, project]);
+  const onDataMachine = estimate && dataView ? estimate.machines.find((m) => m.machineId === dataView.dataset.machineId) : undefined;
+
   // -------------------------------------------------- actions
 
   const save = async (train: boolean) => {
@@ -498,6 +508,23 @@ export function ModelBuilder({ state, onTrain, onOpenData, importFile }: { state
               </button>
             ))
           )}
+        </div>
+      )}
+      {estimate?.estimate && (
+        <div className="estimate-bar" title={`Estimated from ${estimate.estimate.basis}. Real numbers depend on the data loader and the GPU's other work.`}>
+          <Gauge size={13} />
+          <span>
+            About <b>{Math.max(1, Math.ceil(estimate.estimate.memMiB / 1024))} GB</b> of GPU memory
+            {onDataMachine?.seconds != null && (
+              <>
+                {" "}
+                · <b>{fmtSeconds(onDataMachine.seconds)}</b> on {onDataMachine.name}
+              </>
+            )}
+            {onDataMachine && !onDataMachine.fits && <span className="err-text"> · more than {onDataMachine.name} has free</span>}
+            {estimate.note && <span className="faint"> · {estimate.note}</span>}
+          </span>
+          <span className="faint mono">{estimate.estimate.params.toLocaleString()} parameters</span>
         </div>
       )}
       {trainBlocker && project && (

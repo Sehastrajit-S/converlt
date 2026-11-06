@@ -214,6 +214,9 @@ const COMMON = (cls: string, stem: string, data: TrainData, extraImports: string
   `if "train" not in loaders or len(loaders["train"]) == 0:`,
   `    raise SystemExit(${JSON.stringify(`No training data found for ${data.name}.${data.spec.kind === "tabular" ? " Run its preprocessing in Converlt → Data first: training reads the processed splits." : ""}`)})`,
   `train_loader, val_loader = loaders["train"], loaders.get("val")`,
+  `if main and converge is not None:  # fingerprints the data, so a reproduction can check it got the same`,
+  `    import data.${data.loaderStem}_loader as _data`,
+  `    converge.log_dataset(getattr(_data, "DATA_DIR", None) or getattr(_data, "ROOT", None), name=${JSON.stringify(data.name)})`,
   `if world > 1:`,
   `    from torch.utils.data import DataLoader, DistributedSampler`,
   `    train_loader = DataLoader(train_loader.dataset, batch_size=args.batch_size, sampler=DistributedSampler(train_loader.dataset, num_replicas=world, rank=rank, shuffle=True),`,
@@ -369,8 +372,90 @@ export function generateTrainCode(g: ModelGraph, data: TrainData, a: GraphAnalys
     `        print("epoch %d: %s" % (epoch + 1, ", ".join("%s %.4f" % kv for kv in metrics.items())))`,
     `    if step >= total:`,
     `        break`,
+    ``,
+    ...finalEvaluation(mode, classes),
     ...TAIL(stem),
   ].join("\n");
+}
+
+/**
+ * After training: score the test split (validation if there's none) and record the examples the
+ * model gets most wrong, so the run shows where it fails, not just how often.
+ */
+function finalEvaluation(mode: Exclude<TrainMode, "diffusion">, classes: number): string[] {
+  const perExample: Record<Exclude<TrainMode, "diffusion">, string[]> = {
+    classify: [
+      `def per_example(out, x, y):  # each example's loss, and whether it got anything wrong`,
+      `    b = y.shape[0]`,
+      `    o, t = out.float().reshape(-1, ${classes}), y.reshape(-1)`,
+      `    loss = nn.functional.cross_entropy(o, t, reduction="none").reshape(b, -1).mean(1)`,
+      `    return loss, (o.argmax(-1) != t).reshape(b, -1).any(1)`,
+    ],
+    binary: [
+      `def per_example(out, x, y):  # each example's loss, and whether it got anything wrong`,
+      `    b = y.shape[0]`,
+      `    o, t = out.float().reshape(b, -1), y.float().reshape(b, -1)`,
+      `    loss = nn.functional.binary_cross_entropy_with_logits(o, t, reduction="none").mean(1)`,
+      `    return loss, ((o > 0).float() != t).any(1)`,
+    ],
+    regress: [
+      `def per_example(out, x, y):  # each example's squared error; nothing is simply "wrong"`,
+      `    y = y.float()`,
+      `    return (out.float().reshape(y.shape) - y).pow(2).reshape(y.shape[0], -1).mean(1), None`,
+    ],
+    reconstruct: [
+      `def per_example(out, x, y):  # how badly each example is rebuilt`,
+      `    return (out.float() - x.float()).pow(2).reshape(x.shape[0], -1).mean(1), None`,
+    ],
+  };
+  const accuracy = mode === "classify" || mode === "binary";
+  return [
+    ``,
+    ...perExample[mode],
+    ``,
+    ``,
+    `@torch.no_grad()`,
+    `def final_evaluation(worst=8):`,
+    `    split = "test" if loaders.get("test") is not None else "val" if val_loader is not None else None`,
+    `    if split is None:`,
+    `        return`,
+    `    raw.eval()`,
+    `    n = loss_sum = correct = count = wrong = 0`,
+    `    keep_l = keep_x = keep_y = None`,
+    `    for batch in loaders["test"] if split == "test" else val_loader:`,
+    `        x, y = unpack(batch)`,
+    `        with torch.autocast(device_type, dtype=amp, enabled=amp != torch.float32):`,
+    `            out = raw(x)`,
+    `        loss, c, k = step_loss(out, x, y)`,
+    `        loss_sum, n = loss_sum + loss.item() * x.size(0), n + x.size(0)`,
+    `        correct, count = correct + c, count + k`,
+    `        l, w = per_example(out, x, y)`,
+    `        if w is not None:`,
+    `            wrong += int(w.sum())`,
+    `            l = torch.where(w, l, torch.full_like(l, -1.0))  # only mistakes can be "worst"`,
+    `        # Keep the worst few seen so far (on the CPU), not the whole split.`,
+    `        cand_l = l.cpu() if keep_l is None else torch.cat([keep_l, l.cpu()])`,
+    `        cand_x = x.cpu() if keep_x is None else torch.cat([keep_x, x.cpu()])`,
+    `        cand_y = None if y is None else y.cpu() if keep_y is None else torch.cat([keep_y, y.cpu()])`,
+    `        top = cand_l.topk(min(worst, len(cand_l))).indices`,
+    `        keep_l, keep_x = cand_l[top], cand_x[top]`,
+    `        keep_y = cand_y[top] if cand_y is not None else None`,
+    `    raw.train()`,
+    `    if split == "test":`,
+    `        metrics = {"test/loss": loss_sum / max(n, 1)}`,
+    ...(accuracy ? [`        metrics["test/accuracy"] = correct / max(count, 1)`] : []),
+    `        print("test: %s" % ", ".join("%s %.4f" % kv for kv in metrics.items()))`,
+    `        if run:`,
+    `            run.log(metrics, step=step)`,
+    `    if run and keep_l is not None and hasattr(run, "log_failures"):  # older Converlt SDKs don't record them`,
+    `        mask = keep_l >= 0  # nothing wrong leaves it empty, and the score is still recorded`,
+    `        base = getattr(train_loader.dataset, "dataset", train_loader.dataset)`,
+    `        run.log_failures(raw, keep_x[mask], keep_y[mask] if keep_y is not None else None, losses=keep_l[mask], class_names=getattr(base, "classes", None), total=n, wrong=${accuracy ? "wrong" : "None"}, split=split)`,
+    ``,
+    ``,
+    `if main:`,
+    `    final_evaluation()`,
+  ];
 }
 
 /** DDPM on the dataset's examples: noise to a random step t, learn to predict the noise; --sample N draws N at the end. */

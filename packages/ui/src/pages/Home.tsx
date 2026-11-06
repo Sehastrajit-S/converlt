@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Activity, ArrowRight, Boxes, Cloud, Code2, Coins, Cpu, Database, FlaskConical, FolderOpen, Play, Plus, Network, Rocket, Server, Sparkles, Table2 } from "lucide-react";
+import { Activity, ArrowRight, Boxes, Cloud, Code2, Coins, Cpu, Database, FlaskConical, FolderOpen, Milestone, Play, Plus, Network, Rocket, Server, Sparkles, Table2 } from "lucide-react";
 import type { AppState, RunListItem } from "@converge/core/api";
 import { formatCredits, formatHours, useCloudStatus, usePods, useWallet } from "../cloud.ts";
 import { StatusPill } from "../components/ui.tsx";
@@ -17,6 +17,7 @@ export interface HomeActions {
   onAddMachine: () => void;
   onOpenBuilder?: () => void;
   onOpenData?: () => void;
+  onOpenGuide?: () => void;
   /** Dashboard mode (Converlt IDE): the page owns the window and lists projects. */
   dashboard?: boolean;
   onShowCode?: () => void;
@@ -132,6 +133,17 @@ export function Home({ state, runs, ...a }: { state: AppState; runs: RunListItem
             {!state.project && state.recentProjects.length === 0 && <div className="faint" style={{ padding: "6px 2px" }}>No recent projects. Open the folder with your training code.</div>}
           </div>
         </div>
+      )}
+
+      {a.onOpenGuide && (
+        <button className="guide-banner" onClick={a.onOpenGuide} disabled={!state.project} title={state.project ? undefined : "Open a project first"}>
+          <Milestone size={20} />
+          <span>
+            <b>New to training models? Follow the ML Guide.</b>
+            <span className="faint"> Seven steps, one page each: data, prepare, model, train, evaluate, improve, share.</span>
+          </span>
+          <ArrowRight size={16} />
+        </button>
       )}
 
       {(a.onOpenData || a.onOpenBuilder) && (

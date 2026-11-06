@@ -12,3 +12,6 @@ export * from "./data.ts";
 export * from "./weights.ts";
 export * from "./training.ts";
 export * from "./codeimport.ts";
+export * from "./sweep.ts";
+export * from "./estimate.ts";
+export * from "./report.ts";

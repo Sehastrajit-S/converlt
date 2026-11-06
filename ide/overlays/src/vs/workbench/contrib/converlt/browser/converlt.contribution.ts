@@ -278,6 +278,7 @@ MenuRegistry.appendMenuItem(MenuId.MenubarMainMenu, {
 });
 
 const mlItems: [group: string, id: string, title: string, when?: RawContextKey<boolean>][] = [
+	['0_guide', 'converge.openGuide', localize({ key: 'converlt.miGuide', comment: ['&& denotes a mnemonic'] }, "ML &&Guide (Step by Step)")],
 	['0_data', 'converge.openData', localize({ key: 'converlt.miData', comment: ['&& denotes a mnemonic'] }, "&&Data: Load, Explore, Preprocess")],
 	['0_data', 'converge.openHub', localize({ key: 'converlt.miHub', comment: ['&& denotes a mnemonic'] }, "Download Datasets && Models...")],
 	['0_model', 'converge.openModelBuilder', localize({ key: 'converlt.miBuilder', comment: ['&& denotes a mnemonic'] }, "&&Model Builder")],

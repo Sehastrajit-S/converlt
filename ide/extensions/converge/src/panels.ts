@@ -70,6 +70,8 @@ export class Panels implements vscode.Disposable {
         return "Model Builder";
       case "data":
         return "Data";
+      case "guide":
+        return "ML Guide";
       case "models":
         return "Models";
       case "envs":
@@ -134,6 +136,8 @@ export class Panels implements vscode.Disposable {
         return this.open({ view: "builder" });
       case "openData":
         return this.open({ view: "data" });
+      case "openGuide":
+        return this.open({ view: "guide" });
       case "openModels":
         return this.open({ view: "models" });
       case "openEnvironments":

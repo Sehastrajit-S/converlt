@@ -1,6 +1,7 @@
 {
   "name": "converge",
   "private": true,
+  "license": "Apache-2.0",
   "version": "0.1.0",
   "description": "Converlt — the ML-native IDE that connects your code, GPUs, and experiments.",
   "packageManager": "pnpm@11.6.0",

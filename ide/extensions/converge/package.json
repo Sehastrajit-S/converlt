@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "publisher": "converge",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.140.0"
   },
@@ -208,6 +208,12 @@
         "title": "Show Dashboard",
         "category": "Converlt",
         "icon": "$(dashboard)"
+      },
+      {
+        "command": "converge.openGuide",
+        "title": "Open ML Guide (Step by Step)",
+        "category": "Converlt",
+        "icon": "$(milestone)"
       },
       {
         "command": "converge.openData",

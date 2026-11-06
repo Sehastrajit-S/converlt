@@ -7,6 +7,7 @@ import {
   Compare,
   Compute,
   Data,
+  Guide,
   Empty,
   Environments,
   Gpus,
@@ -51,7 +52,7 @@ function App({ initial }: { initial: Route }) {
       try {
         const plan = await api.planReproduce(runId);
         const name = runs.find((r) => r.runId === runId)?.name;
-        setNewRun({ command: plan.command, machineId: plan.machineId, options: plan.options, warnings: plan.warnings, reproducedFrom: runId, reproducedName: name });
+        setNewRun({ command: plan.command, machineId: plan.machineId, options: plan.options, warnings: plan.warnings, reproducedFrom: runId, reproducedName: name, plan });
       } catch (e) {
         toast("error", "Cannot reproduce", errorMessage(e));
       }
@@ -88,6 +89,7 @@ function App({ initial }: { initial: Route }) {
         onOpenHub={() => hostCommand({ name: "openHub" })}
         onOpenData={() => hostCommand({ name: "openData" })}
         onOpenBuilder={() => hostCommand({ name: "openBuilder" })}
+        onOpenGuide={() => hostCommand({ name: "openGuide" })}
         onAddMachine={() => setMachineDialog({})}
       />
     );
@@ -100,6 +102,22 @@ function App({ initial }: { initial: Route }) {
         preselect={route.preselect}
         onRun={(machineId) => (state.project ? setNewRun({ machineId }) : hostCommand({ name: "newRun", machineId }))}
         onEnvironments={(machineId) => hostCommand({ name: "openEnvironments", machineId })}
+      />
+    );
+  } else if (route.view === "guide" && state.project) {
+    body = (
+      <Guide
+        state={state}
+        runs={runs}
+        actions={{
+          openData: () => hostCommand({ name: "openData" }),
+          openHub: () => hostCommand({ name: "openHub" }),
+          openBuilder: () => hostCommand({ name: "openBuilder" }),
+          newRun: (p) => setNewRun(p ?? {}),
+          openRun: (runId) => hostCommand({ name: "openRun", runId }),
+          compare: (runIds) => hostCommand({ name: "openCompare", runIds }),
+          addMachine: () => setMachineDialog({}),
+        }}
       />
     );
   } else if (route.view === "data") {

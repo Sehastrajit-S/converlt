@@ -16,17 +16,20 @@ import {
   OctagonAlert,
   RefreshCw,
   RotateCcw,
+  Share2,
+  CircleCheck,
   Search,
   Square,
   TriangleAlert,
   Unplug,
 } from "lucide-react";
 import { isTerminal, primaryMetricKey, seriesStats, type DiagnosticEvent, type RunNotes } from "@converge/run-protocol";
-import type { RunView } from "@converge/core/api";
+import type { ReproductionCheck, RunView } from "@converge/core/api";
 import { api, errorMessage, useRun } from "../api.ts";
 import { LineChart, SERIES_COLORS, smooth } from "../components/Chart.tsx";
 import { formatCredits } from "../cloud.ts";
 import { ForecastCard, type RentRequest } from "../components/ForecastCard.tsx";
+import { FailuresStrip } from "../components/ExamplesStrip.tsx";
 import { Empty, Meter, StatusPill, Switch, useToast } from "../components/ui.tsx";
 import { formatBytes, formatDate, formatDuration, formatMiB, formatNumber, formatUsd, formatValue } from "../format.ts";
 
@@ -73,6 +76,15 @@ export function RunDetail({ runId, onBack, onReproduce, onRent }: { runId: strin
     }
   };
 
+  const share = async () => {
+    try {
+      const r = await api.shareRun(runId);
+      if (r) toast("success", "Run saved to share", `${r.path}\nSend it to a teammate: in Converlt, Runs → Open shared run. They need access to the git repository too.`);
+    } catch (e) {
+      toast("error", "Couldn't share the run", errorMessage(e));
+    }
+  };
+
   return (
     <div className="page">
       <button className="btn ghost sm" onClick={onBack} style={{ marginLeft: -8, marginBottom: 10 }}>
@@ -85,6 +97,11 @@ export function RunDetail({ runId, onBack, onReproduce, onRent }: { runId: strin
             <StatusPill status={run.status} connection={run.connection} />
             {run.notes.group && <span className="tag accent">{run.notes.group}</span>}
             {m.reproducedFrom && <span className="tag">reproduction</span>}
+            {m.shared && (
+              <span className="tag" title={`From ${m.shared.by}'s ${m.shared.project} (${m.shared.originalName}), shared ${formatDate(m.shared.at / 1000)}`}>
+                shared by {m.shared.by}
+              </span>
+            )}
           </div>
           <div className="page-sub">
             <span className="mono selectable" style={{ fontSize: 12 }}>{m.command}</span>
@@ -101,10 +118,17 @@ export function RunDetail({ runId, onBack, onReproduce, onRent }: { runId: strin
             {cancelling || run.status === "cancelling" ? <LoaderCircle size={14} className="spin" /> : <Square size={13} fill="currentColor" />} Stop
           </button>
         )}
+        {isTerminal(run.status) && !m.shared && (
+          <button className="btn" onClick={share} title="Save this run to a file someone else can open in Converlt and reproduce">
+            <Share2 size={14} /> Share
+          </button>
+        )}
         <button className="btn" onClick={() => onReproduce(runId)}>
           <RotateCcw size={14} /> Reproduce
         </button>
       </div>
+
+      {run.reproduction && <ReproductionCard check={run.reproduction} />}
 
       {run.local?.phase === "launch_failed" && (
         <div className="callout err" style={{ marginBottom: 14 }}>
@@ -129,6 +153,7 @@ export function RunDetail({ runId, onBack, onReproduce, onRent }: { runId: strin
 
       <Stats run={run} />
       <ForecastCard run={run} onRent={onRent} />
+      {s.failures && <FailuresStrip failures={s.failures} scores={Object.keys(s.metrics).filter((k) => k.startsWith(`${s.failures!.split}/`) && s.failures!.split === "test").map((k) => ({ key: k, value: s.metrics[k]!.at(-1)?.value ?? null }))} />}
 
       {s.diagnostics.map((d) => (
         <DiagnosticCard key={d.kind} d={d} run={run} />
@@ -161,6 +186,44 @@ export function RunDetail({ runId, onBack, onReproduce, onRent }: { runId: strin
 }
 
 // ---------------------------------------------------------------- stats
+
+/** Whether a reproduction got the original run's result. */
+function ReproductionCard({ check }: { check: ReproductionCheck }) {
+  const ok = check.verdict === "reproduced";
+  const fmt = (v: number | null) => (v === null ? "—" : formatValue(v));
+  return (
+    <div className={`callout ${ok ? "ok" : check.verdict === "differs" ? "" : "info"}`} style={{ marginBottom: 14 }}>
+      {ok ? <CircleCheck size={16} /> : <TriangleAlert size={16} />}
+      <div style={{ minWidth: 0 }}>
+        <b>{ok ? `Reproduced ${check.originalName}` : check.verdict === "differs" ? `Didn't reproduce ${check.originalName}` : `Couldn't tell whether this reproduced ${check.originalName}`}</b>
+        {check.metric && (
+          <span>
+            {" "}
+            · {check.metric}: {fmt(check.original)} originally, {fmt(check.reproduction)} now
+            {check.gapPct !== null && ` (${check.gapPct >= 0 ? "+" : ""}${check.gapPct.toFixed(1)}%`}
+            {check.gapPct !== null && check.noisePct !== null && `; run-to-run noise about ${check.noisePct.toFixed(1)}%`}
+            {check.gapPct !== null && ")"}
+          </span>
+        )}
+        {check.same.length > 0 && <div className="faint" style={{ marginTop: 3 }}>Same: {check.same.join(", ")}.</div>}
+        {!ok && check.causes.length > 0 && (
+          <ul style={{ margin: "4px 0 0" }}>
+            {check.causes.map((c) => (
+              <li key={`${c.category}:${c.subject}`}>
+                <b>{c.subject}</b> ({c.category}){c.from !== undefined || c.to !== undefined ? `: ${c.from ?? "—"} → ${c.to ?? "—"}` : ""}. {c.reason}
+              </li>
+            ))}
+          </ul>
+        )}
+        {check.notes.map((n) => (
+          <div key={n} className="faint" style={{ marginTop: 3 }}>
+            {n}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function Stat({ icon, label, value, sub, children }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode; children?: ReactNode }) {
   return (

@@ -721,6 +721,22 @@ class Supervisor:
             inputs = rec.get("inputs")
             if isinstance(inputs, list) and inputs:
                 self.events.emit("examples", inputs=inputs[:8], labels=(rec.get("labels") or [])[:8], shape=rec.get("shape"), classNames=(rec.get("classNames") or [])[:1000])
+        elif kind == "failures":
+            inputs = rec.get("inputs")
+            if isinstance(inputs, list):  # empty when nothing was wrong
+                wrong = rec.get("wrong")
+                self.events.emit(
+                    "failures",
+                    split=str(rec.get("split") or "test"),
+                    inputs=inputs[:8],
+                    labels=(rec.get("labels") or [])[:8],
+                    predictions=(rec.get("predictions") or [])[:8],
+                    losses=[v for v in (rec.get("losses") or [])[:8] if isinstance(v, (int, float))],
+                    shape=rec.get("shape"),
+                    classNames=(rec.get("classNames") or [])[:1000],
+                    total=int(rec.get("total") or len(inputs)),
+                    wrong=int(wrong) if isinstance(wrong, (int, float)) and not isinstance(wrong, bool) else None,
+                )
         elif kind == "perf":
             self.on_data_window(rec)
         elif kind == "input":

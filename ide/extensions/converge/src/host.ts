@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import os from "node:os";
+import path from "node:path";
 import { THEMES } from "@converge/ui/themes";
 
 function readUiTheme(): { current: string; followSystem: boolean } {
@@ -202,6 +204,27 @@ export class Host implements vscode.Disposable {
     reconnectRun: (runId) => this.service.reconnectRun(runId),
     saveNotes: (runId, notes) => this.service.saveNotes(runId, notes),
     planReproduce: (runId) => this.service.planReproduce(runId),
+    reproduceEnv: (runId, machineId) => this.service.reproduceEnv(runId, machineId),
+    shareRun: async (runId) => {
+      const run = this.service.getRun(runId);
+      const project = this.service.project;
+      if (!run || !project) throw new Error("Unknown run");
+      const target = await vscode.window.showSaveDialog({
+        title: `Share ${run.manifest.name}`,
+        saveLabel: "Save run file",
+        defaultUri: vscode.Uri.file(path.join(os.homedir(), `${project.name}-${run.manifest.name.replace(/[^\w.-]+/g, "_")}.converlt-run`)),
+        filters: { "Converlt run": ["converlt-run"] },
+      });
+      if (!target) return null;
+      await this.service.exportRun(runId, target.fsPath);
+      return { path: target.fsPath };
+    },
+    openSharedRun: async () => {
+      const [file] =
+        (await vscode.window.showOpenDialog({ title: "Open a shared run", openLabel: "Open run", canSelectMany: false, filters: { "Converlt run": ["converlt-run"] } })) ?? [];
+      if (!file) return null;
+      return this.service.importRun(file.fsPath);
+    },
     openPatch: async (runId: string) => {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(this.service.patchPath(runId)));
       await vscode.window.showTextDocument(doc, { preview: true });
@@ -209,6 +232,15 @@ export class Host implements vscode.Disposable {
     gitDiff: (from, to) => this.service.gitDiff(from, to),
     explainRuns: (a, b) => this.service.explainRuns(a, b),
     explainRunsWithAi: (a, b) => this.service.explainRunsWithAi(a, b),
+    estimateJob: (req) => this.service.estimateJob(req),
+    launchSweep: (req) => this.service.launchSweep(req),
+    listSweeps: async () => this.service.listSweeps(),
+    cancelSweep: async (name) => this.service.cancelSweep(name),
+    writeReport: async (req) => {
+      const r = await this.service.writeReport(req);
+      await vscode.commands.executeCommand("markdown.showPreview", vscode.Uri.file(r.path)).then(undefined, () => vscode.window.showTextDocument(vscode.Uri.file(r.path)));
+      return { path: r.path };
+    },
     updateSettings: (patch) => writeSettings(patch),
     testPhoneAlert: (url) => this.service.testPhoneAlert(url),
 

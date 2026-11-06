@@ -1,10 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
   analyzeGraph,
+  buildReport,
   dataStem,
+  estimateDesign,
+  estimateFromHistory,
+  expandSweep,
+  parseSweepValues,
+  rankMachines,
+  rankRuns,
+  reportMetric,
+  type JobEstimate,
+  type MachineCandidate,
+  type ReportRun,
+  type SweepValues,
   datasetSpec,
   explainRuns,
   generateLoaderCode,
@@ -56,6 +69,11 @@ import type {
   DatasetView,
   BuilderImportResult,
   BuilderSaveResult,
+  JobEstimateResult,
+  ReproductionCheck,
+  SharedRunFile,
+  SweepInfo,
+  SweepRequest,
 } from "./api.ts";
 import { AgentClient } from "./agentClient.ts";
 import type { CloudPod, CloudStatus, GpuOffer, LaunchPodRequest, LedgerEntry, ModelInfo, SpendLimits, WalletSummary } from "./cloudApi.ts";
@@ -71,7 +89,7 @@ import { detectLocalGpus, detectThisComputer } from "./localGpus.ts";
 
 export const DEFAULT_IDLE_STOP_MINUTES = 30;
 import { CLOUD_HUB_ROOT, HUB_ROOT, HubManager, hubDetails, hubSearch, type HubSecrets } from "./hub.ts";
-import { changedFiles, currentBranch, diffCommits, diffFiles, isGitRepo } from "./git.ts";
+import { changedFiles, currentBranch, diffCommits, diffFiles, isGitRepo, remoteUrl, userName } from "./git.ts";
 import { RunManager, type TransportFactory } from "./runManager.ts";
 import { explainSshError, isLocalHost, LOCAL_HOST, parseWslHost, transportFor } from "./transport.ts";
 
@@ -80,6 +98,19 @@ export interface PendingRun {
   command: string;
   options: RunOptions;
   reproducedFrom?: string;
+}
+
+/** A sweep in progress: runs waiting for their machine, and the runs it started. */
+interface SweepState {
+  name: string;
+  total: number;
+  perMachine: number;
+  options: RunOptions;
+  queue: { command: string; label: string; machineId: string }[];
+  /** runId → machineId of the sweep's runs still running. */
+  active: Map<string, string>;
+  started: string[];
+  errors: string[];
 }
 
 /** Persistence for registered machines; each shell supplies its own (JSON file, VS Code globalState, ...). */
@@ -125,6 +156,30 @@ export interface ServiceOptions {
   openExternal?: (url: string) => Promise<boolean>;
 }
 
+/**
+ * A requirements file from a run's recorded packages (pip freeze). Pinned name==version lines only:
+ * local paths and editable installs can't be installed elsewhere. CUDA builds of PyTorch
+ * (2.4.1+cu121) come from PyTorch's own package index.
+ */
+export function requirementsFrom(freeze: string[]): { text: string; packages: number; skipped: string[] } {
+  const keep: string[] = [];
+  const skipped: string[] = [];
+  const indexes = new Set<string>();
+  for (const raw of freeze) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._\-\[\],]*==[A-Za-z0-9.+!_\-]+$/.test(line)) {
+      skipped.push(line);
+      continue;
+    }
+    const cu = /\+(cu\d{2,3}|cpu|rocm[\d.]+)$/.exec(line);
+    if (cu) indexes.add(`https://download.pytorch.org/whl/${cu[1]}`);
+    keep.push(line);
+  }
+  const text = [...[...indexes].map((u) => `--extra-index-url ${u}`), ...keep].join("\n") + "\n";
+  return { text, packages: keep.length, skipped };
+}
+
 export function validateMachine(input: MachineInput): MachineInput {
   const host = input.host.trim();
   if (!host || /\s/.test(host) || host.startsWith("-")) throw new Error("Enter an SSH host like user@gpu-box, an ~/.ssh/config alias, or wsl:<distro>.");
@@ -159,6 +214,8 @@ export class ConvergeService {
   manager: RunManager | null = null;
   /** Idle-stop choice for pods launched in this session, until their machine exists. */
   private readonly pendingIdle = new Map<string, number>();
+  /** Sweep runs waiting for a free slot on their machine, and the sweep runs now running. */
+  private readonly sweeps = new Map<string, SweepState>();
   /** Runs to start on a pod as soon as it's reachable ("rent this GPU and run there"), by pod id. */
   private readonly pendingRuns = new Map<string, PendingRun & { tries: number }>();
 
@@ -184,7 +241,11 @@ export class ConvergeService {
       {
         onRunsChanged: (ids) => hooks.runsChanged(ids),
         onLaunchProgress: (prog) => hooks.launchProgress(prog),
-        onRunFinished: (name, status, message, runId) => hooks.runFinished(name, status, message, runId),
+        onRunFinished: (name, status, message, runId) => {
+          hooks.runFinished(name, status, message, runId);
+          if (runId) void this.advanceSweeps(runId);
+          if (runId) void this.checkReproduction(runId).catch(() => {});
+        },
       },
       this.opts.resourcesDir,
       this.opts.transportFactory ?? ((m) => transportFor(m, this.opts.settings().sshPath)),
@@ -375,8 +436,84 @@ export class ConvergeService {
     return this.requireManager().saveNotes(runId, notes);
   }
 
-  planReproduce(runId: string) {
-    return this.requireManager().planReproduce(runId, this.machines);
+  async planReproduce(runId: string) {
+    const projectData = this.project ? (await this.readDatasets()).datasets : [];
+    return this.requireManager().planReproduce(runId, this.machines, projectData);
+  }
+
+  // ------------------------------------------------------------ sharing and reproducing
+
+  /** Writes a finished run to a .converlt-run file (gzipped JSON) for someone else to open. */
+  async exportRun(runId: string, file: string): Promise<void> {
+    const mgr = this.requireManager();
+    const data = await mgr.runData(runId, (await this.readDatasets()).datasets);
+    const bundle = await mgr.exportRun(runId, { by: await userName(mgr.projectPath), remote: await remoteUrl(mgr.projectPath), data });
+    await fs.writeFile(file, gzipSync(Buffer.from(JSON.stringify(bundle))));
+  }
+
+  /** Opens a .converlt-run file into this project's runs. */
+  async importRun(file: string): Promise<{ runId: string; existed: boolean }> {
+    const mgr = this.requireManager();
+    const raw = await fs.readFile(file);
+    let bundle: SharedRunFile;
+    try {
+      bundle = JSON.parse((raw[0] === 0x1f && raw[1] === 0x8b ? gunzipSync(raw) : raw).toString("utf8"));
+    } catch {
+      throw new Error("This isn't a Converlt run file.");
+    }
+    const r = await mgr.importRun(bundle);
+    this.opts.hooks.runsChanged([r.runId]);
+    return r;
+  }
+
+  /**
+   * A Python environment on the machine with the packages the run recorded, for reproducing it.
+   * Named after the package list, so reproducing several runs with the same packages builds it once.
+   */
+  async reproduceEnv(runId: string, machineId: string): Promise<{ python: string; created: boolean; log: string }> {
+    const reqs = requirementsFrom(this.requireManager().runPackages(runId));
+    if (!reqs.packages) throw new Error("The run didn't record its packages, so its environment can't be rebuilt.");
+    const name = `repro-${createHash("sha256").update(reqs.text).digest("hex").slice(0, 10)}`;
+    const envs = this.envsFor(machineId);
+    const existing = (await envs.list()).envs.find((e) => e.managed && e.name === name && !e.error);
+    if (existing) return { python: existing.python, created: false, log: `Using ${name}, built earlier with the same packages.` };
+    const res = await envs.create({ name, kind: "venv", requirements: reqs.text });
+    if (!res.ok) throw new Error(`Couldn't rebuild the environment:\n${res.log.slice(-1500)}`);
+    const made = (await envs.list()).envs.find((e) => e.managed && e.name === name);
+    if (!made) throw new Error("The environment was built but can't be found on the machine.");
+    return { python: made.python, created: true, log: res.log.slice(-1500) };
+  }
+
+  /** When a reproduction finishes: compares it with the original and records whether it matched. */
+  private async checkReproduction(runId: string): Promise<void> {
+    const v = this.getRun(runId);
+    const orig = v?.manifest.reproducedFrom;
+    if (!v || !orig || !this.getRun(orig)) return;
+    const o = this.getRun(orig)!;
+    let e: RunExplanation | null = null;
+    try {
+      e = await this.explainRuns(orig, runId);
+    } catch {
+      // judged on status alone below
+    }
+    const sameStatus = o.status === v.status;
+    const verdict: ReproductionCheck["verdict"] = !sameStatus ? "differs" : !e || e.verdict === "unknown" ? "unknown" : e.verdict === "within-noise" ? "reproduced" : "differs";
+    const notes = [...(e?.notes ?? [])];
+    if (!sameStatus) notes.unshift(`The original ${o.status === "completed" ? "finished" : o.status}, the reproduction ${v.status === "completed" ? "finished" : v.status}.`);
+    await this.requireManager().setReproduction(runId, {
+      at: Date.now(),
+      originalRunId: orig,
+      originalName: o.manifest.name,
+      verdict,
+      metric: e?.metric ?? null,
+      original: e?.a ?? null,
+      reproduction: e?.b ?? null,
+      gapPct: e?.gapPct ?? null,
+      noisePct: e?.noisePct ?? null,
+      causes: (e?.causes ?? []).slice(0, 4),
+      same: e?.unchanged ?? [],
+      notes,
+    });
   }
 
   gitDiff(from: string, to: string) {
@@ -412,6 +549,187 @@ export class ConvergeService {
     const [a, b] = this.runPair(baseRunId, otherRunId);
     return explainRuns(a, b, (await this.codeChanges(a, b)).changes);
   }
+
+  // ------------------------------------------------------------ sweeps, estimates, reports
+
+  /** Training examples in a dataset's training split, if known. */
+  private trainSamples(d: DatasetRef, p: DataProfile | null): number | null {
+    if (!p) return null;
+    if (p.kind === "tensors") {
+      const train = p.splits.find((s) => s.name === "train")?.count;
+      return train ?? (Math.round((p.splits[0]?.count ?? 0) * 0.9) || null);
+    }
+    const total = p.kind === "tabular" ? p.rows : p.kind === "images" ? p.files : 0;
+    if (!total) return null;
+    const split = d.steps.find((s) => s.op === "split") as { val: number; test: number } | undefined;
+    return Math.round(total * (split ? 1 - split.val - split.test : 0.8));
+  }
+
+  /** Every machine as a candidate for a job: readiness, free GPU memory, runs already on it, price. */
+  private machineCandidates(): MachineCandidate[] {
+    const running = this.listRuns().filter((r) => r.status === "running" || r.status === "preparing" || r.status === "created");
+    return this.machines.map((m) => {
+      const p = this.probes[m.id];
+      return {
+        id: m.id,
+        name: m.name,
+        ready: !!p?.ok && p.ready !== false,
+        busy: running.filter((r) => r.machineName === m.name).length,
+        gpus: (p?.gpus ?? []).map((g) => ({ name: g.name, memTotalMiB: g.memTotalMiB, memUsedMiB: g.memUsedMiB })),
+        pricePerHour: m.cloudPricePerHour ?? m.hourlyRate ?? null,
+      };
+    });
+  }
+
+  /**
+   * GPU memory and time a job should take, and the machines ranked for it. A Model Builder design
+   * is estimated from its layers and dataset; any other command from its earlier runs.
+   */
+  async estimateJob(req: { command?: string; graph?: ModelGraph; batch?: number }): Promise<JobEstimateResult> {
+    let estimate: JobEstimate | null = null;
+    let note: string | null = null;
+    if (req.graph) {
+      let samples: number | null = null;
+      if (req.graph.dataset) {
+        const found = await this.findDataset(req.graph.dataset).catch(() => null);
+        if (found) samples = this.trainSamples(found.d, found.db.profiles[found.d.id]?.profile ?? null);
+      }
+      estimate = estimateDesign(req.graph, { batch: req.batch ?? 64, samples });
+      if (!estimate) note = "Fix the design first: it doesn't compute yet.";
+      else if (samples === null) note = "Memory only: profile the dataset in Data to estimate the time too.";
+    } else if (req.command) {
+      const past = this.listRuns().map((r) => ({ name: r.name, command: r.command, status: r.status, durationSec: r.durationSec, gpu: r.gpuName, peakGpuMemMiB: this.getRun(r.runId)?.summary.peakGpuMemMiB ?? null }));
+      estimate = estimateFromHistory(req.command, past);
+      if (!estimate) note = "No finished run of this script yet, so there's nothing to estimate from. After one run, Converlt estimates the next.";
+    }
+    const ranked = rankMachines(estimate, this.machineCandidates());
+    return {
+      estimate,
+      machines: ranked.map((c) => ({ machineId: c.machine.id, name: c.machine.name, seconds: c.seconds, fits: c.fits, cost: c.cost, reason: c.reason })),
+      recommendedMachineId: ranked.find((c) => c.fits)?.machine.id ?? null,
+      note,
+    };
+  }
+
+  /** Starts a sweep: each setting becomes a run, at most `perMachine` at once per machine; the rest queue. */
+  async launchSweep(req: SweepRequest): Promise<SweepInfo> {
+    this.requireManager();
+    let values: SweepValues;
+    if (typeof req.values === "string") {
+      const parsed = parseSweepValues(req.values);
+      if (parsed.errors.length) throw new Error(parsed.errors.join("; "));
+      values = parsed.values;
+    } else values = req.values;
+    const points = expandSweep(req.command, values, { mode: req.mode ?? "grid", max: req.max ?? 24, seed: Date.now() % 1e9 });
+    if (!Array.isArray(points)) throw new Error(points.error);
+    let machineIds = (req.machineIds ?? []).filter((id) => this.machines.some((m) => m.id === id));
+    if (!machineIds.length) {
+      const best = (await this.estimateJob({ command: req.command })).recommendedMachineId ?? this.machines[0]?.id;
+      if (!best) throw new Error("No machines. Add one or launch a cloud GPU first.");
+      machineIds = [best];
+    }
+    const stamp = new Date().toISOString().slice(5, 16).replace("T", " ");
+    let name = req.name?.trim() || `sweep ${stamp}`;
+    while (this.sweeps.has(name)) name += "'";
+    const st: SweepState = {
+      name,
+      total: points.length,
+      perMachine: Math.max(1, Math.min(8, req.perMachine ?? 1)),
+      options: req.options ?? this.defaultRunOptions(),
+      queue: points.map((p, i) => ({ command: p.command, label: p.label, machineId: machineIds[i % machineIds.length]! })),
+      active: new Map(),
+      started: [],
+      errors: [],
+    };
+    this.sweeps.set(name, st);
+    for (const id of machineIds) for (let k = 0; k < st.perMachine; k++) await this.startNext(st, id);
+    return this.sweepInfo(st);
+  }
+
+  private sweepInfo(st: SweepState): SweepInfo {
+    return { name: st.name, total: st.total, started: [...st.started], running: st.active.size, queued: st.queue.length, errors: [...st.errors] };
+  }
+
+  listSweeps(): SweepInfo[] {
+    return [...this.sweeps.values()].map((s) => this.sweepInfo(s));
+  }
+
+  /** Drops a sweep's waiting runs; the ones running carry on unless stopped. */
+  cancelSweep(name: string): void {
+    const st = this.sweeps.get(name);
+    if (st) st.queue = [];
+    this.opts.hooks.stateChanged();
+  }
+
+  private async startNext(st: SweepState, machineId: string): Promise<void> {
+    const i = st.queue.findIndex((q) => q.machineId === machineId);
+    if (i < 0) return;
+    const item = st.queue.splice(i, 1)[0]!;
+    try {
+      const { runId } = await this.launchRun({ machineId, command: item.command, options: st.options });
+      st.active.set(runId, machineId);
+      st.started.push(this.listRuns().find((r) => r.runId === runId)?.name ?? runId);
+      await this.saveNotes(runId, { group: st.name, hypothesis: item.label, expected: "", changes: item.label, observed: "", conclusion: "" });
+    } catch (e) {
+      st.errors.push(`${item.label}: ${e instanceof Error ? e.message : String(e)}`);
+      await this.startNext(st, machineId);
+    }
+    this.opts.hooks.stateChanged();
+  }
+
+  private async advanceSweeps(runId: string): Promise<void> {
+    for (const st of this.sweeps.values()) {
+      const machineId = st.active.get(runId);
+      if (machineId === undefined) continue;
+      st.active.delete(runId);
+      await this.startNext(st, machineId);
+    }
+  }
+
+  private reportRun(v: RunView): ReportRun {
+    return {
+      name: v.manifest.name,
+      status: v.status,
+      command: v.manifest.command,
+      config: v.effectiveConfig,
+      summary: v.summary,
+      durationSec: v.durationSec,
+      costUsd: v.costUsd,
+      machine: v.manifest.machine.name,
+      gpu: v.summary.env?.gpus?.[0]?.name ?? v.summary.latestTelemetry?.gpus[0]?.name ?? null,
+      group: v.notes.group,
+      gitCommit: v.manifest.git?.commit ?? null,
+      dirty: v.manifest.git?.dirty ?? false,
+    };
+  }
+
+  /** The experiment report for some runs (a group, given runs, or the latest 30), saved to reports/ in the project. */
+  async writeReport(req: { runIds?: string[]; group?: string; metric?: string } = {}): Promise<{ path: string; markdown: string }> {
+    if (!this.project) throw new Error("Open a project first.");
+    let items = this.listRuns();
+    if (req.runIds?.length) items = items.filter((r) => req.runIds!.includes(r.runId) || req.runIds!.includes(r.name));
+    else if (req.group) items = items.filter((r) => r.group === req.group);
+    else items = items.slice(0, 30);
+    if (!items.length) throw new Error(req.group ? `No runs in the group "${req.group}".` : "No runs to report on yet.");
+    const views = items.map((r) => this.getRun(r.runId)).filter((v): v is RunView => !!v);
+    const runs = views.map((v) => this.reportRun(v));
+    const metric = req.metric ?? reportMetric(runs);
+    const ranked = rankRuns(runs, metric).filter((r) => r.value !== null);
+    let why: RunExplanation | null = null;
+    if (ranked.length >= 2) {
+      const id = (name: string) => views.find((v) => v.manifest.name === name)!.manifest.runId;
+      why = await this.explainRuns(id(ranked[1]!.run.name), id(ranked[0]!.run.name)).catch(() => null);
+    }
+    const markdown = buildReport({ project: this.project.name, runs, metric, why });
+    const dir = path.join(this.project.path, "reports");
+    await fs.mkdir(dir, { recursive: true });
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const file = path.join(dir, `experiments-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.md`);
+    await fs.writeFile(file, markdown);
+    return { path: file, markdown };
+  }
+
 
   testPhoneAlert(url: string): Promise<void> {
     return publishNtfy(url, "Converlt phone alerts work", "You'll get a message here when a run finishes, fails, hits a NaN loss or stalls, even with the editor closed.", ["white_check_mark"]);

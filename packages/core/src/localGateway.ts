@@ -5,7 +5,7 @@
 // In this mode credits are a spending budget at cost: no margin, 100 credits = $1.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -144,6 +144,8 @@ export class LocalGateway {
   }
 
   private async spawn(admin: string, runpod: string, openrouter: string): Promise<string> {
+    if (!existsSync(this.opts.script))
+      throw new Error("This build of Converlt doesn't include the gateway for \"Use my own keys\" (it was built without Converlt-server). Use a Converlt account, or your own GPU machines over SSH.");
     const port = await freePort();
     const url = `http://127.0.0.1:${port}`;
     const log = openSync(path.join(this.dataDir, "gateway.log"), "a");

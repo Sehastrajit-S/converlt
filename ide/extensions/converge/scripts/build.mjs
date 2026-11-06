@@ -12,13 +12,12 @@ const repo = path.resolve(ext, "../../..");
 const dist = path.join(ext, "dist");
 const watch = process.argv.includes("--watch");
 
-// The gateway lives in the Converlt-server repo, checked out next to this one.
+// The gateway for "Use my own keys" lives in the Converlt-server repo (not public), checked out
+// next to this one. Without it the build still works; only that mode is left out.
 const server = path.resolve(process.env.CONVERLT_SERVER_DIR ?? path.join(repo, "../Converlt-server"));
 const gatewayMain = path.join(server, "src/main.ts");
-if (!existsSync(gatewayMain)) {
-  console.error(`Converlt-server not found at ${server}. Clone it next to this repo and run pnpm install there, or set CONVERLT_SERVER_DIR.`);
-  process.exit(1);
-}
+const withGateway = existsSync(gatewayMain);
+if (!withGateway) console.warn(`Note: Converlt-server not found at ${server}, so "Use my own keys" is left out of this build. Set CONVERLT_SERVER_DIR to include it.`);
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(path.join(dist, "remote/agent"), { recursive: true });
@@ -43,16 +42,20 @@ const targets = [
     format: "esm",
     target: "node22",
   },
-  {
-    ...common,
-    // The Converlt Gateway, run on this computer in "use my own keys" mode.
-    entryPoints: { "gateway/main": gatewayMain },
-    outdir: dist,
-    outExtension: { ".js": ".mjs" },
-    platform: "node",
-    format: "esm",
-    target: "node22",
-  },
+  ...(withGateway
+    ? [
+        {
+          ...common,
+          // The Converlt Gateway, run on this computer in "use my own keys" mode.
+          entryPoints: { "gateway/main": gatewayMain },
+          outdir: dist,
+          outExtension: { ".js": ".mjs" },
+          platform: "node",
+          format: "esm",
+          target: "node22",
+        },
+      ]
+    : []),
   {
     ...common,
     entryPoints: { extension: path.join(ext, "src/extension.ts") },

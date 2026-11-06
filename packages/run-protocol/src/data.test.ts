@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dataInsights, generateLoaderCode, generatePreprocessCode, processedDir, type ColumnProfile, type DatasetRef, type ImageProfile, type TabularProfile } from "./index.ts";
+import { dataInsights, generateLoaderCode, generatePreprocessCode, processedDir, pyPath, type ColumnProfile, type DatasetRef, type ImageProfile, type TabularProfile } from "./index.ts";
 
 const num = (name: string, o: Partial<ColumnProfile> & { min?: number; max?: number; mean?: number; p50?: number; p01?: number; p99?: number; outliers?: number } = {}): ColumnProfile => ({
   name,
@@ -109,4 +109,12 @@ test("loaders: tensors from processed splits for tables; ImageFolder with transf
   assert.match(img, /TRAIN_TRANSFORM = transforms\.Compose\(\[transforms\.RandomResizedCrop\(SIZE, scale=\(0\.6, 1\.0\)\), transforms\.RandomHorizontalFlip\(\), transforms\.ToTensor\(\), NORMALIZE\]\)/);
   assert.match(img, /EVAL_TRANSFORM = transforms\.Compose\(\[transforms\.Resize\(\(SIZE, SIZE\)\), transforms\.ToTensor\(\), NORMALIZE\]\)/, "no augmentation at evaluation");
   assert.match(img, /persistent_workers=workers > 0/);
+});
+
+test("generated data paths in a home folder work for another person", () => {
+  assert.equal(pyPath("/home/sehas/.converge/hub/hf/datasets/iris"), 'os.path.expanduser("~/.converge/hub/hf/datasets/iris")');
+  assert.equal(pyPath("/root/data"), 'os.path.expanduser("~/data")');
+  assert.equal(pyPath("/workspace/data"), '"/workspace/data"');
+  const loader = generateLoaderCode(ds({ path: "/home/ana/data/churn.csv" }));
+  assert.match(loader, /DATA_DIR = os\.path\.expanduser\("~\/data\/churn_data_processed"\)/);
 });

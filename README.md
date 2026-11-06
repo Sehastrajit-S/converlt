@@ -10,18 +10,16 @@ This is the MVP slice of the [product blueprint](docs/blueprint.md): remote GPU 
 
 Prerequisites: Node 22+, pnpm, `ssh` and `tar` on PATH (both ship with Windows 10+, macOS, and Linux). The GPU machine needs Linux, Python 3.8+, `bash`, and key-based SSH access (or WSL2 for a local GPU). Building the IDE also needs the toolchain listed in [ide/README.md](ide/README.md).
 
-The IDE bundles the gateway from the [Converlt-server](https://github.com/Sehastrajit-S/Converlt-server) repo, so check both out side by side (or set `CONVERLT_SERVER_DIR`):
-
 ```bash
 git clone https://github.com/Sehastrajit-S/converlt Converlt
-git clone https://github.com/Sehastrajit-S/Converlt-server
-(cd Converlt-server && pnpm install)
 cd Converlt
 pnpm install
 pnpm fetch        # once: portable Node, Code-OSS checkout, dependencies (~10 min)
 pnpm build        # packaged IDE -> ide/out/Converlt-win32-x64/Converlt.exe
 pnpm build:dev    # compile only; then ide/vscode/scripts/code.bat for a dev window
 ```
+
+The "Use my own keys" mode runs the Converlt Gateway on your computer. The gateway is in the separate Converlt-server repository, which isn't public; with a checkout of it next to this one (or `CONVERLT_SERVER_DIR` pointing at it), the build includes that mode. Without it, everything else builds and works.
 
 1. **Add a machine.** In the Converlt sidebar, click Compute → Add Machine. Choose an SSH host (`user@host` or an `~/.ssh/config` alias), or **Local GPU via WSL**. Converlt installs its agent into `~/.converge` on the machine and checks readiness (driver, PyTorch, CUDA, disk). For a new SSH host, run `ssh <host>` once to accept its key.
 2. **Open your project folder.** You don't need to restructure it.
@@ -94,3 +92,11 @@ To try an extension change without a full IDE build, run `pnpm build:dev` once, 
 ## Not built yet (by design)
 
 These are deferred per the blueprint until users show sustained demand: cloud providers beyond RunPod, idle shutdown, team sync and control plane, automatic AI run analysis, gradient/profiler instrumentation, a dataset workbench, and deployment.
+
+## License
+
+Converlt is open source under the [Apache License 2.0](LICENSE): the IDE, its extension, the run protocol, the remote agent and the Python SDK. The IDE is built from [Code - OSS](https://github.com/microsoft/vscode), which is MIT licensed; see [NOTICE](NOTICE).
+
+The hosted Converlt service (accounts, credits, cloud GPUs and the gateway behind them) is a separate product and isn't covered by this license.
+
+Converlt is not affiliated with Microsoft. It installs extensions from [Open VSX](https://open-vsx.org), not the Visual Studio Marketplace. For Python it offers basedpyright and the Python extension from Open VSX; Pylance is licensed for Microsoft's VS Code only.

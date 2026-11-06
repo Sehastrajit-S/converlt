@@ -13,6 +13,7 @@ export type Route =
   | { view: "themes" }
   | { view: "builder"; importFile?: string | null }
   | { view: "data" }
+  | { view: "guide" }
   | { view: "models" }
   | { view: "envs"; machineId?: string | null }
   | { view: "hub"; machineId?: string | null };
@@ -30,6 +31,7 @@ export type HostCommand =
   | { name: "openAlerts" }
   | { name: "openBuilder" }
   | { name: "openData" }
+  | { name: "openGuide" }
   | { name: "openModels" }
   | { name: "openEnvironments"; machineId?: string | null }
   | { name: "openHub"; machineId?: string | null }

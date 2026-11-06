@@ -307,6 +307,31 @@ class Run:
         self._examples = x
         self._write(dict(rec, type="examples"))
 
+    def log_failures(self, model, inputs, labels=None, losses=None, class_names=None, total=None, wrong=None, split="test", count=8):
+        """After training: record the examples the model gets most wrong (highest loss first), with
+        its predictions for them. `total`/`wrong` say how many examples were scored and missed."""
+        if not self.active:
+            return
+        from . import _weights
+
+        try:
+            if inputs is None or len(inputs) == 0:  # nothing wrong: still record the score
+                rec = {"inputs": [], "labels": [], "predictions": [], "losses": [], "shape": None}
+                if class_names:
+                    rec["classNames"] = [str(c) for c in list(class_names)[:1000]]
+                n = 0
+            else:
+                x = inputs[:count].detach().cpu()
+                y = labels[:count].detach().cpu() if labels is not None else None
+                rec = _weights.encode_examples(x, y, class_names)
+                rec["predictions"] = _weights.predictions(model, x)
+                rec["losses"] = [float("%.4g" % v) for v in (losses[:count].detach().cpu().float().tolist() if losses is not None else [])]
+                n = len(x)
+        except Exception:
+            return
+        rec.update(type="failures", split=str(split), total=int(total if total is not None else n), wrong=None if wrong is None else int(wrong))
+        self._write(rec)
+
     def _maybe_log_weights(self, step):
         last = self._weights_last
         if last is None:

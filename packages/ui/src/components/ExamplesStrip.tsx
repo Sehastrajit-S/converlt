@@ -2,7 +2,7 @@
 // video, waveform, heatmap, feature bars, token ids), with the true label and what the model
 // predicted at the selected training step.
 import { useEffect, useRef } from "react";
-import type { ExampleLabel, ExamplePrediction, ExamplesEvent, ExampleVisual } from "@converge/run-protocol";
+import type { ExampleLabel, ExamplePrediction, ExamplesEvent, ExampleVisual, FailuresEvent } from "@converge/run-protocol";
 
 const fmt = (v: number) => (Math.abs(v) >= 1000 || (Math.abs(v) < 0.01 && v !== 0) ? v.toExponential(1) : String(Number(v.toPrecision(3))));
 
@@ -138,6 +138,57 @@ export function ExamplesStrip({ examples, predictions, step, binary }: { example
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** After training: the held-out examples the model gets most wrong, with what it predicted. */
+export function FailuresStrip({ failures, scores }: { failures: FailuresEvent; scores: { key: string; value: number | null }[] }) {
+  const names = failures.classNames ?? [];
+  const binary = failures.predictions.some((p) => "value" in p && "p" in p) && failures.labels.some((l) => "class" in l);
+  const rate = failures.wrong !== null && failures.total ? failures.wrong / failures.total : null;
+  return (
+    <div className="card eval-card">
+      <div className="card-head">
+        <div className="card-title">Evaluation on the {failures.split} split</div>
+        <span className="faint" style={{ fontSize: 12 }}>
+          {failures.total.toLocaleString()} examples
+          {failures.wrong !== null ? ` · ${failures.wrong.toLocaleString()} wrong (${(rate! * 100).toFixed(1)}%)` : ""}
+          {scores.map((s) => ` · ${s.key} ${s.value === null ? "—" : fmt(s.value)}`).join("")}
+        </span>
+      </div>
+      <div className="card-body">
+        {failures.inputs.length ? (
+          <div className="examples-strip">
+            <div className="ex-title">
+              <b>{failures.wrong !== null ? "Worst mistakes" : "Hardest examples"}</b>
+              <span className="faint">highest loss first</span>
+            </div>
+            {failures.inputs.map((v, i) => (
+              <div key={i} className="ex-card">
+                <div className="ex-visual">
+                  <Visual v={v} />
+                </div>
+                {labelText(failures.labels[i], names) !== null && (
+                  <div className="ex-line">
+                    <span className="faint">true</span> {labelText(failures.labels[i], names)}
+                  </div>
+                )}
+                <div className="ex-line">
+                  <span className="faint">{failures.predictions[i] && "kind" in failures.predictions[i]! ? "rebuilt" : "model"}</span> <Prediction p={failures.predictions[i]} label={failures.labels[i]} names={names} binary={binary} />
+                </div>
+                {failures.losses[i] !== undefined && (
+                  <div className="ex-line">
+                    <span className="faint">loss</span> <span className="mono">{fmt(failures.losses[i]!)}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="faint">No mistakes on this split.</span>
+        )}
+      </div>
     </div>
   );
 }

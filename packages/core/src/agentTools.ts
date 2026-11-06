@@ -1,7 +1,7 @@
 // Converlt tools for AI agents: the editor's own assistant and outside agents (Claude Code,
 // Codex) through the Converlt MCP server. Definitions are plain data (the MCP server needs them
 // without the service); `runAgentTool` executes them against a live ConvergeService.
-import { forecastRun } from "@converge/run-protocol";
+import { dataInsights, datasetSpec, fmtSeconds, forecastRun } from "@converge/run-protocol";
 import type { RunView } from "./api.ts";
 import type { ConvergeService } from "./service.ts";
 
@@ -58,6 +58,60 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     description: "Stop a running Converlt training run (SIGTERM, then SIGKILL after the grace period). The user approves it.",
     inputSchema: { type: "object", properties: { run: { type: "string", description: "Run name or id" } }, required: ["run"] },
     needsApproval: true,
+  },
+  {
+    name: "converlt_compareRuns",
+    description:
+      "Why one Converlt run turned out differently from another: which did better on the target metric and whether the gap is beyond noise, the step where they split, and the likely causes ranked (config, code, data, environment, hardware). Use it before suggesting a fix for a regression.",
+    inputSchema: {
+      type: "object",
+      properties: { base: { type: "string", description: "The reference run (name or id), e.g. the good one" }, other: { type: "string", description: "The run to explain against it" } },
+      required: ["base", "other"],
+    },
+  },
+  {
+    name: "converlt_listDatasets",
+    description:
+      "The project's datasets (Converlt → Data): where each lives, its size and shape, what it feeds a model (input shape, task, classes), and data checks: leakage, ID columns, missing values, imbalance, duplicates, corrupt images, each with the suggested fix.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "converlt_estimateJob",
+    description:
+      "Before launching: about how much GPU memory and time a training command needs (from earlier runs of the same script), and the user's machines ranked for it, with which ones it fits on, which are busy, and the cost on paid GPUs.",
+    inputSchema: { type: "object", properties: { command: { type: "string", description: "The training command, e.g. python train.py --lr 3e-4" } }, required: ["command"] },
+  },
+  {
+    name: "converlt_launchSweep",
+    description:
+      "Launch a hyperparameter sweep: the command is run once per setting, with each value written into its command line (--key value). Runs are grouped under the sweep's name; on each machine they run one at a time unless perMachine is higher. The user approves the whole sweep once. Follow it with converlt_report for the group.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Base command, e.g. python train.py --epochs 10" },
+        values: { type: "string", description: "One option per line: 'lr = 1e-3, 3e-4' or a range 'lr = 1e-4..1e-2 x4 log' (4 log-spaced values)" },
+        mode: { type: "string", enum: ["grid", "random"], description: "grid (default): every combination; random: a sample of max combinations" },
+        max: { type: "number", description: "Most runs (default 24)" },
+        machines: { type: "array", items: { type: "string" }, description: "Machine names to spread runs over; omit to use the best machine for the job" },
+        perMachine: { type: "number", description: "Runs at once on each machine (default 1)" },
+        name: { type: "string", description: "Name for the group of runs" },
+      },
+      required: ["command", "values"],
+    },
+    needsApproval: true,
+  },
+  {
+    name: "converlt_report",
+    description:
+      "Write the experiment report (Markdown, saved under reports/ in the project) and return it: runs ranked on the best shared metric with the settings that varied, the best run with its command, commit and data, the evaluation's worst mistakes, problems, and suggested next experiments.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        group: { type: "string", description: "Only runs in this group (e.g. a sweep's name)" },
+        runs: { type: "array", items: { type: "string" }, description: "Only these runs (names or ids)" },
+        metric: { type: "string", description: "Rank by this metric instead of the automatic choice" },
+      },
+    },
   },
 ];
 
@@ -180,6 +234,70 @@ export async function runAgentTool(name: string, input: Record<string, unknown>,
       if (!ok) return "The user declined.";
       await s.cancelRun(item.runId);
       return `Stopping ${item.name}.`;
+    }
+    case "converlt_compareRuns": {
+      const a = findRun(String(input.base ?? ""));
+      const b = findRun(String(input.other ?? ""));
+      if (!a || !b) return `No run named ${!a ? input.base : input.other}. Use converlt_listRuns.`;
+      return JSON.stringify(await s.explainRuns(a.runId, b.runId), null, 1).slice(0, MAX);
+    }
+    case "converlt_listDatasets": {
+      const list = await s.dataList();
+      if (!list.length) return "No datasets in this project's Data list yet. Add one in Converlt → Data, or download one with Datasets & models.";
+      return JSON.stringify(
+        list.map((v) => {
+          const spec = datasetSpec(v.dataset, v.profile);
+          return {
+            name: v.dataset.name,
+            machine: v.machineName,
+            path: v.dataset.path,
+            format: v.dataset.format,
+            target: v.dataset.target ?? null,
+            feedsModel: spec.summary,
+            inputShape: spec.inputShape,
+            task: spec.task,
+            classes: spec.classes,
+            blockers: spec.blockers,
+            preprocessing: v.dataset.steps.map((st) => st.op),
+            checks: v.profile ? dataInsights(v.profile, v.dataset.steps).map((i) => ({ severity: i.severity, title: i.title, detail: i.detail, fix: i.fix?.op ?? null })) : "not profiled yet",
+          };
+        }),
+        null,
+        1,
+      ).slice(0, MAX);
+    }
+    case "converlt_estimateJob": {
+      const r = await s.estimateJob({ command: String(input.command ?? "") });
+      const e = r.estimate;
+      return [
+        !e
+          ? (r.note ?? "No estimate.")
+          : e.measured
+            ? `From ${e.basis}: it took ${fmtSeconds(e.measured.seconds)} on ${e.measured.gpu ?? "its machine"}, and that GPU peaked at ${(e.memMiB / 1024).toFixed(1)} GB in use (everything on the GPU, not just this job).`
+            : `Estimate from ${e.basis}: about ${Math.ceil(e.memMiB / 1024)} GB of GPU memory.`,
+        "Machines, best first:",
+        ...r.machines.map((m, i) => `${i + 1}. ${m.name}: ${m.reason}${m.fits ? "" : " (doesn't fit)"}`),
+      ].join("\n");
+    }
+    case "converlt_launchSweep": {
+      if (!s.project) throw new Error("No project is open in Converlt.");
+      const command = String(input.command ?? "").trim();
+      const values = String(input.values ?? "");
+      const names = Array.isArray(input.machines) ? input.machines.map((x) => String(x).toLowerCase()) : [];
+      const machineIds = s.listMachines().filter((m) => names.some((n) => m.name.toLowerCase() === n || m.name.toLowerCase().startsWith(n))).map((m) => m.id);
+      if (names.length && !machineIds.length) return `No machine named ${names.join(", ")}. Use converlt_listMachines.`;
+      const ok = await ctx.approve(`${ctx.client} wants to launch a sweep`, `${command}\n\nvarying:\n${values}\n\n${input.mode === "random" ? `${input.max ?? 24} random settings` : `every combination (at most ${input.max ?? 24} runs)`}`);
+      if (!ok) return "The user declined this sweep.";
+      const info = await s.launchSweep({ command, values, mode: input.mode === "random" ? "random" : "grid", max: typeof input.max === "number" ? input.max : undefined, machineIds, perMachine: typeof input.perMachine === "number" ? input.perMachine : undefined, name: typeof input.name === "string" ? input.name : undefined });
+      return `Sweep "${info.name}": ${info.total} runs, ${info.started.length} started (${info.started.join(", ")}), ${info.queued} waiting their turn.${info.errors.length ? ` Errors: ${info.errors.join("; ")}` : ""} When they finish: converlt_report with group "${info.name}".`;
+    }
+    case "converlt_report": {
+      const r = await s.writeReport({
+        group: typeof input.group === "string" ? input.group : undefined,
+        runIds: Array.isArray(input.runs) ? input.runs.map(String) : undefined,
+        metric: typeof input.metric === "string" ? input.metric : undefined,
+      });
+      return `Saved to ${r.path}\n\n${r.markdown}`.slice(0, MAX);
     }
     default:
       throw new Error(`Unknown tool ${name}`);

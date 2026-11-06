@@ -23,3 +23,4 @@ export type { RentRequest } from "./components/ForecastCard.tsx";
 export type { GpuPreselect } from "./pages/Gpus.tsx";
 export { ModelBuilder } from "./pages/ModelBuilder.tsx";
 export { Data } from "./pages/Data.tsx";
+export { Guide, type GuideStep, type GuideActions } from "./pages/Guide.tsx";

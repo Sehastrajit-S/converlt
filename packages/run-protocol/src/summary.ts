@@ -4,6 +4,7 @@ import type {
   EnvEvent,
   GpuSample,
   ExamplesEvent,
+  FailuresEvent,
   InputEvent,
   WeightsEvent,
   RunEvent,
@@ -55,6 +56,8 @@ export interface RunSummary {
   weights: WeightsEvent[];
   /** A few training inputs, shown above the weights with the model's predictions per snapshot. */
   examples: ExamplesEvent | null;
+  /** The evaluation after training: the examples the model gets most wrong. */
+  failures: FailuresEvent | null;
   logs: LogLine[];
   logCount: number;
 }
@@ -84,6 +87,7 @@ export function createSummary(): RunSummary {
     inputs: [],
     weights: [],
     examples: null,
+    failures: null,
     logs: [],
     logCount: 0,
   };
@@ -178,6 +182,9 @@ export function applyEvent(s: RunSummary, ev: RunEvent): RunSummary {
     }
     case "examples":
       if (Array.isArray(ev.inputs)) s.examples = ev;
+      break;
+    case "failures":
+      if (Array.isArray(ev.inputs)) s.failures = ev;
       break;
     case "weights":
       if (!Array.isArray(ev.tensors)) break;

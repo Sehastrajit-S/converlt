@@ -7,6 +7,7 @@ name = "converge-runtime"
 version = "0.1.0"
 description = "Optional instrumentation for training runs launched by Converlt."
 requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
 dependencies = []
 
 [tool.setuptools]
