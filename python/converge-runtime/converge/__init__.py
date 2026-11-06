@@ -215,6 +215,9 @@ class Run:
         self._closed = False
         self._model = None
         self._nan_reported = False
+        self._weights_on = False
+        self._weights_last = None  # (step, time) of the last snapshot
+        self._last_step = None
         if self.active:
             if self.config:
                 self._write({"type": "config", "values": _jsonable(self.config)})
@@ -246,11 +249,82 @@ class Run:
             if report:
                 self._write({"type": "nan_detail", "data": _jsonable(report)})
         self._write({"type": "metric", "step": int(step), "values": clean})
+        self._last_step = int(step)
+        if self._weights_on:
+            self._maybe_log_weights(int(step))
 
-    def watch(self, model):
-        """On the first non-finite metric, check the model's weights and gradients to locate the NaN."""
+    def watch(self, model, weights=True):
+        """Watch a model: on the first non-finite metric, locate the NaN in its weights and gradients;
+        with weights=True, also snapshot its weights about 40 times over the run (each time
+        metrics are logged, at most every few seconds) for the weights view."""
         self._model = model
+        if weights and self.active and not self._weights_on:
+            self._weights_on = True
+            import atexit
+
+            atexit.register(self._final_weights)
         return model
+
+    def log_weights(self, model=None, step=None):
+        """Snapshot the model's weights now."""
+        model = model if model is not None else self._model
+        if not self.active or model is None:
+            return
+        from . import _weights
+
+        t0 = time.time()
+        try:
+            tensors = _weights.snapshot(model)
+        except Exception:
+            return
+        if self._weights_last is not None:  # the first one pays for CUDA warm-up; don't pace by it
+            self._weights_cost = time.time() - t0
+        if tensors:
+            step = self._last_step if step is None else int(step)
+            self._weights_last = (step, time.time())
+            rec = {"type": "weights", "step": step, "tensors": tensors}
+            examples = getattr(self, "_examples", None)
+            if examples is not None:
+                try:
+                    rec["predictions"] = _weights.predictions(model, examples)
+                except Exception:
+                    pass
+            self._write(rec)
+
+    def log_examples(self, inputs, labels=None, class_names=None, count=5):
+        """Record a few inputs (and labels) to show with the weights view. Each weight snapshot
+        then also records the model's predictions for them, so they can be followed over training."""
+        if not self.active:
+            return
+        from . import _weights
+
+        try:
+            x = inputs[:count].detach().cpu()
+            y = labels[:count].detach().cpu() if labels is not None else None
+            rec = _weights.encode_examples(x, y, class_names)
+        except Exception:
+            return
+        self._examples = x
+        self._write(dict(rec, type="examples"))
+
+    def _maybe_log_weights(self, step):
+        last = self._weights_last
+        if last is None:
+            return self.log_weights(step=step)
+        total = self.config.get("total_steps")
+        every = max(1, int(total) // 40) if isinstance(total, (int, float)) and total > 0 else None
+        due = (step - (last[0] or 0) >= every) if every else (time.time() - last[1] >= 15)
+        # Snapshots cost a GPU sync and a pass over every weight: keep them under ~10% of the time.
+        floor = os.environ.get("CONVERGE_WEIGHTS_MIN_SEC")
+        floor = float(floor) if floor else max(0.2, 10 * getattr(self, "_weights_cost", 0.0))
+        if due and time.time() - last[1] >= floor:
+            self.log_weights(step=step)
+
+    def _final_weights(self):
+        if self._closed or self._model is None:
+            return
+        if self._weights_last is None or self._weights_last[0] != self._last_step:
+            self.log_weights()
 
     def log_dataset(self, source, name=None):
         """Record a dataset with a fingerprint: a path (file or folder), a Hugging Face Dataset, or a dataset with .root."""

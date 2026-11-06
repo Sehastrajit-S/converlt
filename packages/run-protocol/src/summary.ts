@@ -3,7 +3,9 @@ import type {
   DiagnosticEvent,
   EnvEvent,
   GpuSample,
+  ExamplesEvent,
   InputEvent,
+  WeightsEvent,
   RunEvent,
   RunStatus,
   TelemetryEvent,
@@ -49,11 +51,16 @@ export interface RunSummary {
   artifacts: ArtifactEvent[];
   /** Datasets and pretrained weights, one per kind + name (the latest record wins). */
   inputs: InputEvent[];
+  /** Weight snapshots over training, oldest first; thinned to MAX_WEIGHT_SNAPSHOTS, always keeping the latest. */
+  weights: WeightsEvent[];
+  /** A few training inputs, shown above the weights with the model's predictions per snapshot. */
+  examples: ExamplesEvent | null;
   logs: LogLine[];
   logCount: number;
 }
 
 export const MAX_LOG_LINES = 5000;
+export const MAX_WEIGHT_SNAPSHOTS = 60;
 const MAX_TELEMETRY_POINTS = 4000;
 
 export function createSummary(): RunSummary {
@@ -75,6 +82,8 @@ export function createSummary(): RunSummary {
     diagnostics: [],
     artifacts: [],
     inputs: [],
+    weights: [],
+    examples: null,
     logs: [],
     logCount: 0,
   };
@@ -167,6 +176,15 @@ export function applyEvent(s: RunSummary, ev: RunEvent): RunSummary {
       else s.inputs.push(ev);
       break;
     }
+    case "examples":
+      if (Array.isArray(ev.inputs)) s.examples = ev;
+      break;
+    case "weights":
+      if (!Array.isArray(ev.tensors)) break;
+      s.weights.push(ev);
+      // Halve the history, keeping the first and the latest, so long runs stay bounded but span the whole run.
+      if (s.weights.length > MAX_WEIGHT_SNAPSHOTS) s.weights = s.weights.filter((_, i, a) => i % 2 === 0 || i === a.length - 1);
+      break;
   }
   return s;
 }

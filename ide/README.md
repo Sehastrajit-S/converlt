@@ -40,7 +40,10 @@ Requirements: Git, Python 3, Visual Studio 2022 with the C++ workload, and a Win
 `overlays/src/vs/workbench/contrib/converlt/` adds, inside the workbench itself:
 
 - **Dashboard and Code modes.** New windows open on the dashboard (setting `converlt.startup`). Dashboard mode hides the side bars, panel, status bar and tabs and gives the window to the Converlt dashboard; Code mode restores the layout. Opening any file switches to Code. Commands: `converlt.showDashboard`, `converlt.showCode`.
-- **Title bar controls** next to the command center: the Dashboard/Code switch, the compute target (where runs go; opens the compute menu) and the credit balance. The Converlt extension pushes their state with `converlt.titleBar.setState`.
+- **Title bar controls** next to the command center: the Dashboard/Code switch, the current run, the compute target (where runs go; opens the compute menu) and the credit balance. The Converlt extension pushes their state with `converlt.titleBar.setState`.
+- **The current run in the title bar**, in every mode: the newest live run (or one that ended in the last 10 minutes) with a progress bar, time left, the loss, and a warning or error icon when a diagnostic fires (NaN, OOM, slow data loader...). Click it to open the run.
+- **A Train menu** in the menu bar, next to Run: run training, stop, reproduce, the current run, all runs, compare, the model builder, datasets, environments, GPUs and machines, phone alerts and the wallet. Extensions can't add top-level menus, so it lives here.
+- **`Ctrl+Alt+T`** (`Ctrl+Cmd+T` on macOS) starts a training run from anywhere. The context keys `converlt.hasRun` and `converlt.runActive` enable Stop/Reproduce/Show (`converlt.stopActiveRun`, `converlt.reproduceActiveRun`, `converlt.openActiveRun`) only when they apply.
 
 The chat panel is the Converlt assistant: the built-in Converlt extension contributes the default chat participant (the chat prefers an extension's default participant over its built-in setup agent) plus a `converlt` language-model provider (OpenRouter models through the Converlt Gateway, paid from credits). Copilot's `defaultChatAgent` stays in `product.json` because much of the workbench assumes it exists; its sign-in entry points are switched off in `converge-defaults`.
 

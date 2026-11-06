@@ -6,6 +6,7 @@ import { formatDuration, formatMiB, formatNumber } from "@converge/ui/format";
 import { Host, readSettings, requireTrust } from "./host.ts";
 import { locateDiagnostic } from "./locations.ts";
 import { Panels } from "./panels.ts";
+import { titleRun } from "./titleRun.ts";
 import { CloudTree, ComputeTree, MachineItem, RunItem, RunsTree } from "./views.ts";
 import { registerAssistant } from "./chat/assistant.ts";
 import { startBridge } from "@converge/core";
@@ -51,6 +52,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     updateStatus(status, h.service.listRuns());
     const live = h.service.listRuns().filter((r) => !isTerminal(r.status)).length;
     runsView.badge = live ? { value: live, tooltip: `${live} active run${live === 1 ? "" : "s"}` } : undefined;
+    pushTitleState(wasConnected, lastWallet);
   }, 300);
   ctx.subscriptions.push(
     h.events.runsChanged.event(refreshRuns),
@@ -138,6 +140,7 @@ Click to open your wallet`;
       burnPerHour: wallet?.burnPerHour ?? 0,
       target: m ? { label: m.name.split(" · ")[0]!, detail: gpu ?? pod?.gpuName, status } : null,
       tooltip: wallet ? `${wallet.balance.toFixed(2)} credits${wallet.burnPerHour ? `, spending ${wallet.burnPerHour.toFixed(2)}/hr` : ""}. Click for your wallet.` : connected ? undefined : "Sign in to Converlt Cloud",
+      run: titleRun(h.service),
     };
     // The title bar control only exists in the Converlt IDE; stock VS Code has no such command.
     void vscode.commands.executeCommand("converlt.titleBar.setState", state).then(undefined, () => {});
@@ -238,6 +241,18 @@ Click to open your wallet`;
   reg("converge.openGpus", () => panels.open({ view: "gpus" }));
   reg("converge.openModels", () => panels.open({ view: "models" }));
   reg("converge.setupPhoneAlerts", () => panels.open({ view: "alerts" }));
+  reg("converge.openThemes", () => panels.open({ view: "themes" }));
+  reg("converge.openModelBuilder", () => panels.open({ view: "builder" }));
+  // Code → graph: a Python file from the explorer or editor opens in the Model Builder as a graph.
+  reg("converge.openFileAsGraph", (uri?: unknown) => {
+    const target = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
+    const root = h.service.project?.path;
+    if (!target || !root) return void vscode.window.showWarningMessage("Converlt: open a project folder and a Python file with a PyTorch model first.");
+    const rel = path.relative(root, target.fsPath).replace(/\\/g, "/");
+    if (rel.startsWith("..") || !rel.endsWith(".py")) return void vscode.window.showWarningMessage("Converlt: choose a Python file inside the project.");
+    panels.open({ view: "builder", importFile: rel });
+  });
+  reg("converge.openData", () => panels.open({ view: "data" }));
   reg("converge.openHub", (machineId?: unknown) => panels.open({ view: "hub", machineId: typeof machineId === "string" ? machineId : null }));
   reg("converge.openEnvironments", (machineId?: unknown) => panels.open({ view: "envs", machineId: typeof machineId === "string" ? machineId : null }));
   reg("converge.cloudSignIn", async () => {
@@ -271,6 +286,14 @@ Click to open your wallet`;
   reg("converge.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:converge.converge"));
 
   await h.openWorkspace().catch((e) => void vscode.window.showErrorMessage(`Converlt: ${e instanceof Error ? e.message : e}`));
+  // This PC's own GPU shows up as a machine without being added by hand.
+  void h.service.discoverLocalMachines().then(
+    (added) => {
+      for (const m of added)
+        void vscode.window.showInformationMessage(`Converlt found this PC's GPU and added it as a machine: ${m.name} (WSL), using ${m.python}.`, "Show Machines").then((a) => a && panels.open({ view: "compute" }));
+    },
+    () => {},
+  );
   refreshRuns();
   void refreshCloud();
   defaultMachineId = ctx.globalState.get<string>(DEFAULT_MACHINE_KEY) ?? null;
@@ -482,16 +505,35 @@ async function addMachineFlow(h: Host): Promise<Machine | undefined> {
   const kind = await vscode.window.showQuickPick(
     [
       { label: "$(remote) SSH machine", description: "Cloud instance, lab server, or any Linux box you can ssh into", value: "ssh" },
-      ...(process.platform === "win32" ? [{ label: "$(vm) Local GPU via WSL", description: "Train on this PC's NVIDIA GPU through WSL2", value: "wsl" }] : []),
+      ...(process.platform === "win32"
+        ? [{ label: "$(vm) Local GPU via WSL", description: "Train on this PC's NVIDIA GPU through WSL2", value: "wsl" }]
+        : [{ label: "$(device-desktop) This computer", description: process.platform === "darwin" ? "Train here on the Apple GPU (MPS) or CPU" : "Train here on this computer's GPU or CPU", value: "local" }]),
     ],
     { title: "Add GPU machine" },
   );
   if (!kind) return undefined;
   let host: string | undefined;
-  if (kind.value === "wsl") {
-    const distro = await vscode.window.showInputBox({ title: "WSL distribution", value: "Ubuntu", prompt: "Name from `wsl -l -v`" });
-    if (!distro) return undefined;
-    host = `wsl:${distro.trim()}`;
+  let python: string | undefined;
+  if (kind.value === "local") {
+    host = "local";
+    const me = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Converlt: looking for this computer's GPU and PyTorch…" }, () => h.service.detectThisComputer());
+    if (me?.accelerator && me.accelerator !== "none") python = me.python;
+  } else if (kind.value === "wsl") {
+    const found = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Converlt: looking for GPUs in WSL…" }, () => h.service.detectLocalGpus());
+    type Pick = vscode.QuickPickItem & { distro?: string; python?: string };
+    const picks: Pick[] = [
+      ...found.map((g) => ({ label: `$(vm-active) ${g.distro}`, description: g.gpus.join(", "), detail: `${g.python}${g.torchCuda ? " · PyTorch with CUDA" : " · no CUDA PyTorch yet"}`, distro: g.distro, python: g.python })),
+      { label: "$(edit) Another distribution…", description: found.length ? undefined : "no WSL distribution with a GPU was found" },
+    ];
+    const pick = await vscode.window.showQuickPick(picks, { title: "Local GPU via WSL" });
+    if (!pick) return undefined;
+    let distro = pick.distro;
+    if (!distro) {
+      distro = (await vscode.window.showInputBox({ title: "WSL distribution", value: "Ubuntu", prompt: "Name from `wsl -l -v`" }))?.trim();
+      if (!distro) return undefined;
+    }
+    host = `wsl:${distro}`;
+    python = pick.python;
   } else {
     host = await vscode.window.showInputBox({
       title: "SSH host",
@@ -501,7 +543,7 @@ async function addMachineFlow(h: Host): Promise<Machine | undefined> {
     });
     if (!host?.trim()) return undefined;
   }
-  const python = await vscode.window.showInputBox({ title: "Python on the machine", value: "python3", prompt: "Interpreter with PyTorch, e.g. ~/venv/bin/python", ignoreFocusOut: true });
+  python ??= await vscode.window.showInputBox({ title: "Python on the machine", value: "python3", prompt: "Interpreter with PyTorch, e.g. ~/venv/bin/python", ignoreFocusOut: true });
   if (python === undefined) return undefined;
   const rate = await vscode.window.showInputBox({ title: "Hourly rate in USD (optional)", placeHolder: "1.50", prompt: "Only used for cost estimates.", validateInput: (v) => (!v.trim() || Number(v) >= 0 ? null : "Enter a number") });
   if (rate === undefined) return undefined;

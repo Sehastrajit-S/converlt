@@ -1013,10 +1013,162 @@
   color: var(--text-3);
 }
 
-.agents-card {
+.workflow-cards {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 12px;
-  padding: 14px 16px;
   margin-bottom: 16px;
 }
+.workflow-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 24px 22px;
+  min-height: 132px;
+}
+.workflow-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: var(--accent-soft, color-mix(in srgb, var(--accent) 14%, transparent));
+  color: var(--accent);
+}
+.workflow-text {
+  flex: 1;
+  min-width: 0;
+}
+.workflow-text b {
+  font-size: 15px;
+}
+.workflow-text .faint {
+  font-size: 12.5px;
+  margin-top: 4px;
+}
+.workflow-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.workflow-go {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex: none;
+}
+@media (max-width: 640px) {
+  .workflow-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .workflow-go {
+    align-items: flex-start;
+  }
+}
+
+/* Settings: theme gallery */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+  padding: 4px 16px 16px;
+}
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.theme-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.theme-card.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.theme-preview {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.theme-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.theme-card .faint {
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* run view: one row per GPU on multi-GPU machines */
+.per-gpu {
+  grid-column: 1 / -1;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.per-gpu-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 44px 140px 44px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.per-gpu-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.per-gpu-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.per-gpu-bar > span.idle {
+  background: var(--warn);
+}
+
+/* ---- Icon tiles: one black square for all; each icon in its own color from the theme's palette (--tint). */
+.action-icon,
+.workflow-icon,
+.machine-icon,
+.empty-icon,
+.project-icon {
+  background: var(--tile-bg); /* the same black square for every tile */
+  border: 1px solid var(--tile-border);
+  color: var(--tint, var(--s2)); /* the icon carries its own color */
+}
+.actions-grid > :nth-child(6n + 1) .action-icon { --tint: var(--s2); }
+.actions-grid > :nth-child(6n + 2) .action-icon { --tint: var(--s3); }
+.actions-grid > :nth-child(6n + 3) .action-icon { --tint: var(--s5); }
+.actions-grid > :nth-child(6n + 4) .action-icon { --tint: var(--s4); }
+.actions-grid > :nth-child(6n + 5) .action-icon { --tint: var(--s6); }
+.actions-grid > :nth-child(6n + 6) .action-icon { --tint: var(--info); }
+.workflow-cards > :nth-child(1) .workflow-icon { --tint: var(--s2); }
+.workflow-cards > :nth-child(2) .workflow-icon { --tint: var(--s3); }
+.agents-card .action-icon { --tint: var(--s4); }
+.machine-icon { --tint: var(--ok); }
+.empty-icon { --tint: var(--info); }
+.project-icon { --tint: var(--s2); }
+.kpis > :nth-child(1) .kpi-label svg { color: var(--s3); }
+.kpis > :nth-child(2) .kpi-label svg { color: var(--s5); }
+.kpis > :nth-child(3) .kpi-label svg { color: var(--ok); }
+.kpis > :nth-child(4) .kpi-label svg { color: var(--s2); }

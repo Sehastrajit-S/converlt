@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleCheck, CircleX, Cpu, LoaderCircle, Play, Rocket, TriangleAlert } from "lucide-react";
-import { parseCliHyperparameters, type RunOptions } from "@converge/run-protocol";
+import { multiGpuCommand, parseCliHyperparameters, parseMultiGpu, type RunOptions } from "@converge/run-protocol";
 import type { AppState, SyncPlanView } from "@converge/core/api";
 import { api, errorMessage } from "../api.ts";
 import { EnvIssues } from "../components/EnvIssues.tsx";
@@ -199,6 +199,20 @@ export function NewRunDialog({
       <div className="field">
         <label>Command</label>
         <input className="input mono" style={{ height: 40 }} value={command} autoFocus onChange={(e) => setCommand(e.target.value)} onKeyDown={(e) => e.key === "Enter" && launch()} placeholder="python train.py --lr 3e-4" />
+        {(() => {
+          const gpus = selected ? (state.probes[selected.id]?.gpus?.length ?? 0) : 0;
+          const multi = parseMultiGpu(command);
+          const spread = multiGpuCommand(command, gpus);
+          if (gpus < 2 || (!multi && !spread)) return null;
+          return (
+            <div className="row" style={{ gap: 8, marginTop: 8, fontSize: 12.5 }}>
+              <Switch on={!!multi} onChange={(on) => setCommand(on ? (spread ?? command) : (multi?.single ?? command))} label={`Use all ${gpus} GPUs`} />
+              <span>
+                Use all {gpus} GPUs <span className="faint">· one process per GPU with torchrun; the script must use DDP (Model Builder scripts do)</span>
+              </span>
+            </div>
+          );
+        })()}
         <span className="hint">
           Runs in <span className="mono">{state.settings.remoteRoot}/{project.name}</span> with bash. Activate an environment inline if needed, e.g.{" "}
           <span className="mono">source .venv/bin/activate && python train.py</span>

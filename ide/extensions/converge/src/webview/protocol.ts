@@ -10,6 +10,9 @@ export type Route =
   | { view: "wallet" }
   | { view: "gpus"; preselect?: GpuPreselect | null }
   | { view: "alerts" }
+  | { view: "themes" }
+  | { view: "builder"; importFile?: string | null }
+  | { view: "data" }
   | { view: "models" }
   | { view: "envs"; machineId?: string | null }
   | { view: "hub"; machineId?: string | null };
@@ -25,6 +28,8 @@ export type HostCommand =
   | { name: "openWallet" }
   | { name: "openGpus"; preselect?: GpuPreselect | null }
   | { name: "openAlerts" }
+  | { name: "openBuilder" }
+  | { name: "openData" }
   | { name: "openModels" }
   | { name: "openEnvironments"; machineId?: string | null }
   | { name: "openHub"; machineId?: string | null }

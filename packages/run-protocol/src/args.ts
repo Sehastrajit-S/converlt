@@ -68,3 +68,21 @@ export function parseCliHyperparameters(command: string): Record<string, string 
   }
   return out;
 }
+
+const MULTI_GPU = /^\s*python3?\s+-m\s+torch\.distributed\.run\s+--standalone\s+--nproc_per_node=(\d+)\s+(.*)$/;
+
+/**
+ * "python train.py --lr 3e-4" launched on every GPU of the machine with torchrun (one process
+ * per GPU). Null when the command isn't a plain "python script.py …" or there's one GPU.
+ */
+export function multiGpuCommand(command: string, gpus: number): string | null {
+  if (gpus < 2 || MULTI_GPU.test(command)) return null;
+  const m = /^\s*python3?\s+(?!-)(\S+\.py)(.*)$/.exec(command);
+  return m ? `python -m torch.distributed.run --standalone --nproc_per_node=${gpus} ${m[1]}${m[2]}` : null;
+}
+
+/** The GPU count a torchrun command uses, and the plain command it wraps; null if it's not one. */
+export function parseMultiGpu(command: string): { gpus: number; single: string } | null {
+  const m = MULTI_GPU.exec(command);
+  return m ? { gpus: Number(m[1]), single: `python ${m[2]}` } : null;
+}

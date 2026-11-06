@@ -15,7 +15,7 @@ export class AgentError extends Error {
   }
 }
 
-function pythonCmd(python: string): string {
+export function pythonCmd(python: string): string {
   return /^[\w./-]+$/.test(python) ? python : python.startsWith("~/") ? remotePath(python) : shq(python);
 }
 
@@ -57,8 +57,9 @@ export class AgentClient {
     return json;
   }
 
-  probe(workdir: string): Promise<ProbeResult> {
-    return this.call<ProbeResult>(`probe --workdir ${shq(workdir)} --python ${shq(this.python)}`, undefined, 120_000);
+  /** With cpuOk (this computer), a machine without a GPU still counts as ready. */
+  probe(workdir: string, cpuOk = false): Promise<ProbeResult> {
+    return this.call<ProbeResult>(`probe --workdir ${shq(workdir)} --python ${shq(this.python)}${cpuOk ? " --cpu-ok" : ""}`, undefined, 120_000);
   }
 
   telemetry(workdir: string): Promise<TelemetryResult> {

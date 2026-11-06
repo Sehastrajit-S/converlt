@@ -89,6 +89,15 @@ class AgentTest(unittest.TestCase):
         self.assertEqual(statuses, ["preparing", "running", "completed"])
         self.assertTrue(any(e["type"] == "log" and "done" in e["line"] for e in evs))
 
+    def test_bare_python_means_the_machine_interpreter(self):
+        # Ubuntu has no `python`; the run must use the interpreter chosen for the machine.
+        run_id = self.start("python train.py --steps 3 --sleep 0 && python3 -c 'import sys; print(\"py=\" + sys.executable)'")
+        st = self.wait_status(run_id, ("completed", "failed"))
+        evs = self.events(run_id)
+        self.assertEqual(st["effectiveStatus"], "completed", evs)
+        line = [e["line"] for e in evs if e["type"] == "log" and e["line"].startswith("py=")][0]
+        self.assertEqual(os.path.realpath(line[3:]), os.path.realpath(sys.executable))
+
     def test_replay_from_seq(self):
         run_id = self.start("%s train.py --steps 5 --sleep 0" % sys.executable)
         self.wait_status(run_id, ("completed",))

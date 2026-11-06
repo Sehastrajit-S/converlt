@@ -1,4 +1,5 @@
 @import "./cloud.css";
+@import "./builder.css";
 /* Converlt design tokens. Dark is the primary theme; light mirrors it. */
 :root {
   color-scheme: dark;
@@ -1540,4 +1541,10 @@ button {
   width: 280px;
   display: flex;
   justify-content: flex-end;
+}
+
+/* Icon tiles: a near-black square with a white outline in every theme, the icon in color (--tint). */
+:root {
+  --tile-bg: #0a0a0c;
+  --tile-border: rgba(255, 255, 255, 0.85);
 }

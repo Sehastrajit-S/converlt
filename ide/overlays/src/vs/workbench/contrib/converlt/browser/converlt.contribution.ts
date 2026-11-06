@@ -1,7 +1,7 @@
 /*---------------------------------------------------------------------------------------------
- *  Converlt workbench: Dashboard/Code modes and the title-bar compute + credits controls.
- *  The Converlt extension owns the data and the screens; it pushes a small status snapshot
- *  here through the `converlt.titleBar.setState` command.
+ *  Converlt workbench: Dashboard/Code modes, the ML menu, and the title-bar run, compute and
+ *  credits controls. The Converlt extension owns the data and the screens; it pushes a small
+ *  status snapshot here through the `converlt.titleBar.setState` command.
  *--------------------------------------------------------------------------------------------*/
 
 import './media/converlt.css';
@@ -12,15 +12,17 @@ import { mainWindow } from '../../../../base/browser/window.js';
 import { IAction } from '../../../../base/common/actions.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter } from '../../../../base/common/event.js';
+import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { IActionViewItemService } from '../../../../platform/actions/browser/actionViewItemService.js';
-import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { KeybindingsRegistry, KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
@@ -36,6 +38,22 @@ export interface ConverltTitleState {
 	/** The machine runs launch on by default. */
 	target: { label: string; detail?: string; status: 'running' | 'starting' | 'stopped' | 'ready' | 'unreachable' | 'none' } | null;
 	tooltip?: string;
+	/** The run to show: the newest live one, else one that ended in the last few minutes. */
+	run?: ConverltTitleRun | null;
+}
+
+export interface ConverltTitleRun {
+	id: string;
+	name: string;
+	status: string;
+	/** 0–1, when the run's length is known. */
+	progress: number | null;
+	etaSec: number | null;
+	metric: { key: string; value: number | null } | null;
+	/** The most serious diagnostic, in a few words. */
+	problem: { severity: 'error' | 'warning'; text: string } | null;
+	/** Other runs still going. */
+	others: number;
 }
 
 const onDidChangeState = new Emitter<void>();
@@ -46,6 +64,9 @@ function isState(v: unknown): v is ConverltTitleState {
 }
 
 const ConverltReady = new RawContextKey<boolean>('converlt.ready', false, localize('converlt.ready', "Whether the Converlt extension has reported its status"));
+const ConverltHasRun = new RawContextKey<boolean>('converlt.hasRun', false, localize('converlt.hasRun', "Whether there is a current or recent Converlt run"));
+const ConverltRunActive = new RawContextKey<boolean>('converlt.runActive', false, localize('converlt.runActive', "Whether a Converlt training run is in progress"));
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 export const ConverltMode = new RawContextKey<'dashboard' | 'code'>('converlt.mode', 'code', localize('converlt.mode', "Whether Converlt shows the dashboard or the code editor"));
 
 const DASHBOARD_COMMAND = 'converge.openDashboard';
@@ -96,6 +117,8 @@ class ConverltModes extends Disposable implements IWorkbenchContribution {
 		ConverltModes.instance = this;
 		this.modeKey = ConverltMode.bindTo(contextKeyService);
 		const readyKey = ConverltReady.bindTo(contextKeyService);
+		const hasRunKey = ConverltHasRun.bindTo(contextKeyService);
+		const runActiveKey = ConverltRunActive.bindTo(contextKeyService);
 
 		this._register(CommandsRegistry.registerCommand('converlt.titleBar.setState', (_accessor, state: unknown) => {
 			if (!isState(state)) {
@@ -103,6 +126,8 @@ class ConverltModes extends Disposable implements IWorkbenchContribution {
 			}
 			titleState = state;
 			readyKey.set(true);
+			hasRunKey.set(!!state.run);
+			runActiveKey.set(!!state.run && !TERMINAL_STATUSES.has(state.run.status));
 			onDidChangeState.fire();
 		}));
 
@@ -207,6 +232,74 @@ registerAction2(class extends Action2 {
 	}
 });
 
+// ------------------------------------------------------------------ the current run
+
+/** Commands on the run the title bar shows, so menus and keys need no run picker. */
+for (const [id, title, target, precondition] of [
+	['converlt.openActiveRun', localize2('converlt.openActiveRun', "Show Current Run"), 'converge.openRun', ConverltHasRun],
+	['converlt.stopActiveRun', localize2('converlt.stopActiveRun', "Stop Current Run"), 'converge.cancelRun', ConverltRunActive],
+	['converlt.reproduceActiveRun', localize2('converlt.reproduceActiveRun', "Reproduce Current Run"), 'converge.reproduceRun', ConverltHasRun],
+] as const) {
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({ id, title, category: localize2('converlt', "Converlt"), f1: true, precondition: precondition.isEqualTo(true) });
+		}
+		run(accessor: ServicesAccessor): Promise<unknown> | undefined {
+			const run = titleState?.run;
+			return run ? accessor.get(ICommandService).executeCommand(target, run.id) : undefined;
+		}
+	});
+}
+
+// Start a run from anywhere: Ctrl+Alt+T (train).
+KeybindingsRegistry.registerKeybindingRule({
+	id: 'converge.runTraining',
+	weight: KeybindingWeight.WorkbenchContrib,
+	primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyT,
+	mac: { primary: KeyMod.WinCtrl | KeyMod.CtrlCmd | KeyCode.KeyT },
+});
+
+// ------------------------------------------------------------------ the ML menu
+
+/**
+ * A top-level menu for the whole ML workflow, in order: data, model, training, runs, compute.
+ * Extensions can't add top-level menus, so it lives here; the items run the Converlt
+ * extension's commands.
+ */
+const MenubarMlMenu = new MenuId('ConverltMenubarMlMenu');
+
+MenuRegistry.appendMenuItem(MenuId.MenubarMainMenu, {
+	submenu: MenubarMlMenu,
+	title: {
+		...localize2('converlt.mlMenu', "ML"),
+		mnemonicTitle: localize({ key: 'converlt.mMl', comment: ['&& denotes a mnemonic'] }, "&&ML"),
+	},
+	order: 6.5,
+});
+
+const mlItems: [group: string, id: string, title: string, when?: RawContextKey<boolean>][] = [
+	['0_data', 'converge.openData', localize({ key: 'converlt.miData', comment: ['&& denotes a mnemonic'] }, "&&Data: Load, Explore, Preprocess")],
+	['0_data', 'converge.openHub', localize({ key: 'converlt.miHub', comment: ['&& denotes a mnemonic'] }, "Download Datasets && Models...")],
+	['0_model', 'converge.openModelBuilder', localize({ key: 'converlt.miBuilder', comment: ['&& denotes a mnemonic'] }, "&&Model Builder")],
+	['1_run', 'converge.runTraining', localize({ key: 'converlt.miRunTraining', comment: ['&& denotes a mnemonic'] }, "&&Run Training on GPU...")],
+	['1_run', 'converlt.stopActiveRun', localize({ key: 'converlt.miStopRun', comment: ['&& denotes a mnemonic'] }, "&&Stop Current Run"), ConverltRunActive],
+	['1_run', 'converlt.reproduceActiveRun', localize({ key: 'converlt.miReproduce', comment: ['&& denotes a mnemonic'] }, "Re&&produce Current Run..."), ConverltHasRun],
+	['2_runs', 'converlt.openActiveRun', localize({ key: 'converlt.miShowRun', comment: ['&& denotes a mnemonic'] }, "Show &&Current Run"), ConverltHasRun],
+	['2_runs', 'converge.openRuns', localize({ key: 'converlt.miRuns', comment: ['&& denotes a mnemonic'] }, "&&All Runs")],
+	['2_runs', 'converge.compareRuns', localize({ key: 'converlt.miCompare', comment: ['&& denotes a mnemonic'] }, "C&&ompare Runs")],
+	['3_env', 'converge.openEnvironments', localize({ key: 'converlt.miEnvs', comment: ['&& denotes a mnemonic'] }, "&&Environments")],
+	['4_compute', 'converge.computeMenu', localize({ key: 'converlt.miTarget', comment: ['&& denotes a mnemonic'] }, "Choose &&GPU Machine...")],
+	['4_compute', 'converge.openGpus', localize({ key: 'converlt.miGpus', comment: ['&& denotes a mnemonic'] }, "Rent a C&&loud GPU")],
+	['4_compute', 'converge.openCompute', localize({ key: 'converlt.miCompute', comment: ['&& denotes a mnemonic'] }, "&&Machines")],
+	['5_account', 'converge.setupPhoneAlerts', localize({ key: 'converlt.miAlerts', comment: ['&& denotes a mnemonic'] }, "P&&hone Alerts")],
+	['5_account', 'converge.openWallet', localize({ key: 'converlt.miWallet', comment: ['&& denotes a mnemonic'] }, "&&Wallet")],
+	['5_account', 'converlt.showDashboard', localize({ key: 'converlt.miDashboard', comment: ['&& denotes a mnemonic'] }, "Das&&hboard")],
+	['5_account', 'converge.openThemes', localize({ key: 'converlt.miThemes', comment: ['&& denotes a mnemonic'] }, "&&Themes")],
+];
+mlItems.forEach(([group, id, title, when], order) => {
+	MenuRegistry.appendMenuItem(MenubarMlMenu, { group, order, command: { id, title, precondition: when?.isEqualTo(true) } });
+});
+
 // ------------------------------------------------------------------ title bar
 
 const TITLE_ACTION_ID = 'converlt.titleBar';
@@ -226,6 +319,17 @@ registerAction2(class extends Action2 {
 });
 
 const fmtCredits = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** "<1m", "18m", "2h 05m": an estimate, so whole minutes. */
+function fmtEta(sec: number): string {
+	const m = Math.round(sec / 60);
+	if (m < 1) {
+		return '<1m';
+	}
+	return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+}
+
+const fmtMetric = (v: number) => (Math.abs(v) >= 1000 || (Math.abs(v) < 0.001 && v !== 0) ? v.toExponential(2) : v.toPrecision(3));
 
 /** [Dashboard | Code]  [● RTX 4090 pod ⌄]  [◎ 2,499.62] */
 class ConverltTitleBarItem extends BaseActionViewItem {
@@ -291,6 +395,39 @@ class ConverltTitleBarItem extends BaseActionViewItem {
 		const s = titleState;
 		if (!s) {
 			return;
+		}
+
+		// The current run: status, progress, time left, loss, and what's wrong if anything is.
+		const r = s.run;
+		if (r) {
+			const live = !TERMINAL_STATUSES.has(r.status);
+			const tooltip = [
+				`${r.name}: ${r.status}`,
+				r.progress !== null ? localize('converlt.runProgress', "{0}% done", Math.round(r.progress * 100)) + (r.etaSec !== null ? localize('converlt.runEta', ", about {0} left", fmtEta(r.etaSec)) : '') : undefined,
+				r.metric && r.metric.value !== null ? `${r.metric.key} ${fmtMetric(r.metric.value)}` : undefined,
+				r.problem?.text,
+				r.others > 0 ? localize('converlt.runOthers', "{0} more running", r.others) : undefined,
+				localize('converlt.runOpen', "Click to open the run."),
+			].filter(Boolean).join('\n');
+			const seg = this.button(this.root, `run.${r.status}${r.problem ? `.${r.problem.severity}` : ''}`, tooltip, () => this.commandService.executeCommand('converge.openRun', r.id));
+			dom.append(seg, dom.$(`span.converlt-dot.${live ? 'running' : r.status === 'completed' ? 'ready' : 'unreachable'}`));
+			dom.append(seg, dom.$('span.converlt-label', undefined, r.name));
+			if (live && r.progress !== null) {
+				const bar = dom.append(seg, dom.$('span.converlt-progress'));
+				dom.append(bar, dom.$('span')).style.width = `${Math.round(Math.min(1, Math.max(0, r.progress)) * 100)}%`;
+				dom.append(seg, dom.$('span.converlt-sub', undefined, r.etaSec !== null ? fmtEta(r.etaSec) : `${Math.round(r.progress * 100)}%`));
+			} else if (!live) {
+				dom.append(seg, dom.$('span.converlt-sub', undefined, r.status));
+			}
+			if (r.metric && r.metric.value !== null) {
+				dom.append(seg, dom.$('span.converlt-sub.metric', undefined, `${r.metric.key.split('/').pop()} ${fmtMetric(r.metric.value)}`));
+			}
+			if (r.problem) {
+				dom.append(seg, renderIcon(r.problem.severity === 'error' ? Codicon.error : Codicon.warning));
+			}
+			if (r.others > 0) {
+				dom.append(seg, dom.$('span.converlt-badge', undefined, `+${r.others}`));
+			}
 		}
 
 		// Compute target

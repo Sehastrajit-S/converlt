@@ -186,6 +186,81 @@ class HookTest(unittest.TestCase):
         self.assertEqual(perf[0]["batchSize"], 2)
 
     @unittest.skipUnless(HAVE_TORCH, "needs PyTorch")
+    def test_watched_model_weights_are_snapshotted_over_the_run(self):
+        records, _ = self.run_script(
+            """
+            import torch, converge
+            model = torch.nn.Sequential(torch.nn.Linear(4, 64), torch.nn.ReLU(), torch.nn.Linear(64, 2))
+            torch.nn.init.zeros_(model[2].weight)
+            run = converge.run(total_steps=400)
+            run.watch(model)
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            for step in range(400):
+                loss = model(torch.randn(8, 4)).pow(2).mean() + model[0].weight.sum() * 0
+                opt.zero_grad(); loss.backward(); opt.step()
+                run.log({"loss": loss}, step=step)
+            """,
+            env={"CONVERGE_WEIGHTS_MIN_SEC": "0"},
+        )
+        snaps = [r for r in records if r["type"] == "weights"]
+        self.assertGreaterEqual(len(snaps), 2, "first snapshot plus the final one at exit")
+        self.assertLessEqual(len(snaps), 42)
+        self.assertEqual(snaps[0]["step"], 0)
+        self.assertEqual(snaps[-1]["step"], 399, "a final snapshot is written at exit")
+        names = [t["name"] for t in snaps[-1]["tensors"]]
+        self.assertEqual(names, ["0.weight", "0.bias", "2.weight", "2.bias"])
+        w0 = snaps[-1]["tensors"][0]
+        self.assertEqual(w0["shape"], [64, 4])
+        self.assertEqual(sum(w0["hist"]["counts"]), 256)
+        self.assertEqual((len(w0["grid"]), len(w0["grid"][0])), (12, 4))
+        self.assertIn("gradNorm", w0)
+        self.assertLess(snaps[0]["tensors"][2]["std"], 0.01, "zero-initialized layer is near zero at the start")
+        self.assertGreater(snaps[-1]["tensors"][2]["std"], snaps[0]["tensors"][2]["std"], "and spreads out as it trains")
+
+    @unittest.skipUnless(HAVE_TORCH, "needs PyTorch")
+    def test_examples_are_drawn_and_followed_by_predictions(self):
+        records, _ = self.run_script(
+            """
+            import torch, converge
+            model = torch.nn.Sequential(torch.nn.Conv2d(3, 4, 3, padding=1), torch.nn.Flatten(), torch.nn.Linear(4 * 8 * 8, 3))
+            run = converge.run(total_steps=40)
+            run.watch(model)
+            run.log_examples(torch.rand(7, 3, 8, 8), torch.tensor([0, 1, 2, 0, 1, 2, 0]), class_names=["cat", "dog", "fox"])
+            run.log_examples  # fine to call once
+            for step in range(40):
+                run.log({"loss": 1.0}, step=step)
+            ae = torch.nn.Sequential(torch.nn.Linear(16000, 8), torch.nn.Linear(8, 16000))
+            r2 = converge.Run()
+            r2._examples = None
+            """,
+            env={"CONVERGE_WEIGHTS_MIN_SEC": "0"},
+        )
+        ex = [r for r in records if r["type"] == "examples"]
+        self.assertEqual(len(ex), 1)
+        self.assertEqual(len(ex[0]["inputs"]), 5, "at most five")
+        img = ex[0]["inputs"][0]
+        self.assertEqual((img["kind"], img["w"], img["h"], img["c"]), ("image", 8, 8, 3))
+        self.assertEqual(ex[0]["labels"][1], {"class": 1, "name": "dog"})
+        snaps = [r for r in records if r["type"] == "weights"]
+        self.assertTrue(snaps and all(len(s["predictions"]) == 5 for s in snaps))
+        self.assertEqual(set(snaps[-1]["predictions"][0]), {"class", "p"})
+
+    @unittest.skipUnless(HAVE_TORCH, "needs PyTorch")
+    def test_kinds_of_examples(self):
+        sys.path.insert(0, SDK_DIR)
+        import torch
+        from converge import _weights
+
+        self.assertEqual(_weights.encode_one(torch.randint(0, 50, (100,)))["kind"], "tokens")
+        self.assertEqual(_weights.encode_one(torch.randn(1, 16000))["kind"], "wave")
+        self.assertEqual(_weights.encode_one(torch.randn(96, 8))["kind"], "heatmap")
+        self.assertEqual(_weights.encode_one(torch.randn(30))["kind"], "vector")
+        video = _weights.encode_one(torch.rand(3, 16, 64, 64))
+        self.assertEqual((video["kind"], video["frames"], video["w"]), ("image", 16, 48), "middle frame, at most 48 px")
+        ae = torch.nn.Sequential(torch.nn.Linear(10, 4), torch.nn.Linear(4, 10))
+        self.assertEqual(_weights.predictions(ae, torch.randn(2, 10))[0]["kind"], "recon:vector")
+
+    @unittest.skipUnless(HAVE_TORCH, "needs PyTorch")
     def test_nan_report_says_where_the_nan_is(self):
         records, _ = self.run_script(
             """

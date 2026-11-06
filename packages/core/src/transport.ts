@@ -153,7 +153,30 @@ export class WslTransport implements RemoteTransport {
   }
 }
 
+/** The host of "this computer" on macOS and Linux: commands run here directly, no SSH. */
+export const LOCAL_HOST = "local";
+
+export function isLocalHost(host: string): boolean {
+  return host.trim().toLowerCase() === LOCAL_HOST;
+}
+
+/** Runs on this computer with bash (macOS and Linux; on Windows this computer's GPU is reached through WSL). */
+export class LocalTransport implements RemoteTransport {
+  constructor() {
+    if (process.platform === "win32") throw new Error("On Windows, this computer's GPU is used through WSL: add it as wsl:<distro> (Compute → Find this PC's GPU).");
+  }
+
+  exec(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
+    return runProcess("bash", ["-c", command], { timeoutMs: 120_000, ...opts });
+  }
+
+  spawn(command: string): ChildProcess {
+    return spawn("bash", ["-c", command], { stdio: ["ignore", "pipe", "pipe"] });
+  }
+}
+
 export function transportFor(machine: Pick<MachineRef, "host" | "port" | "identityFile" | "cloudPodId">, sshPath: string): RemoteTransport {
+  if (isLocalHost(machine.host)) return new LocalTransport();
   const distro = parseWslHost(machine.host);
   return distro ? new WslTransport(distro) : new SshTransport(machine, sshPath);
 }

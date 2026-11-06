@@ -3,7 +3,7 @@ import { ArrowDownLeft, Bot, CircleCheck, CircleDashed, CircleX, Cloud, Coins, C
 import type { LocalGatewayStatus } from "@converge/core/api";
 import type { CloudStatus, LedgerEntry, SpendLimits, WalletSummary } from "@converge/core/cloud";
 import { Segmented } from "../components/ui.tsx";
-import { api, errorMessage } from "../api.ts";
+import { api, errorMessage, ask } from "../api.ts";
 import { creditsUsd, formatCredits, formatHours, useCloudStatus, useWallet } from "../cloud.ts";
 import { Dialog, useToast } from "../components/ui.tsx";
 import { formatDate } from "../format.ts";
@@ -45,10 +45,10 @@ function ConnectCard({ url, error, onConnected }: { url: string | null; error: s
         </p>
         <div className="cloud-points">
           <span>
-            <Cpu size={14} /> RunPod GPUs, ready for your runs
+            <Cpu size={14} /> Converlt Cloud GPUs, ready for your runs
           </span>
           <span>
-            <Sparkles size={14} /> Claude, GPT, Gemini, Llama… via OpenRouter
+            <Sparkles size={14} /> Claude, GPT, Gemini, Llama… through one Converlt endpoint
           </span>
           <span>
             <Coins size={14} /> Budgets and monthly limits
@@ -300,7 +300,7 @@ function WalletBody({ wallet: w, reload, local, onOpenGpus, onOpenModels }: { wa
           <button
             className="btn ghost sm"
             onClick={async () => {
-              if (!confirm("Sign out of Converlt Cloud on this computer? Running pods keep running and billing.")) return;
+              if (!(await ask("Sign out of Converlt Cloud on this computer? Running pods keep running and billing.", "Sign out"))) return;
               await api.cloudDisconnect();
               toast("info", "Signed out of Converlt Cloud");
             }}
@@ -528,7 +528,7 @@ function LocalGatewayCard({ wallet, reload }: { wallet: WalletSummary; reload: (
         <button
           className="btn ghost sm"
           onClick={async () => {
-            if (!confirm("Stop the local gateway and switch off your own keys? Your running pods are stopped first (their volumes are kept).")) return;
+            if (!(await ask("Stop the local gateway and switch off your own keys? Your running pods are stopped first (their volumes are kept).", "Stop gateway"))) return;
             try {
               await api.localGatewayStop();
             } catch (e) {

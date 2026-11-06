@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, CircleCheck, CircleX, Cloud, Copy, Database, Download, ExternalLink, FileText, Heart, KeyRound, LoaderCircle, Lock, Package, Search, Server, Trash2 } from "lucide-react";
 import type { Machine } from "@converge/run-protocol";
 import type { AppState, HubAccounts, HubDetails, HubItem, HubJob, HubKind, HubSource } from "@converge/core/api";
-import { api, errorMessage } from "../api.ts";
+import { api, errorMessage, ask } from "../api.ts";
 import { Dialog, Empty, Segmented, useToast } from "../components/ui.tsx";
 import { formatBytes, timeAgo } from "../format.ts";
 
@@ -175,7 +175,7 @@ export function Hub({ state, initialMachineId }: { state: AppState; initialMachi
             </div>
           )}
           <MachineDownloads machine={machine} jobs={jobs.data} error={jobs.error} onRemove={async (j) => {
-            if (!machine || !confirm(`Delete ${j.id} from ${machine.name}? Its files are removed from the machine.`)) return;
+            if (!machine || !(await ask(`Delete ${j.id} from ${machine.name}? Its files are removed from the machine.`, "Delete"))) return;
             try {
               await api.hubRemove(machine.id, j.jobId);
               await jobs.reload();

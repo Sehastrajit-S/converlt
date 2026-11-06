@@ -6,13 +6,16 @@ import {
   api,
   Compare,
   Compute,
+  Data,
   Empty,
   Environments,
   Gpus,
   Home,
   Hub,
+  ModelBuilder,
   Models,
   PhoneAlerts,
+  ThemeGallery,
   Wallet,
   errorMessage,
   MachineDialog,
@@ -83,6 +86,8 @@ function App({ initial }: { initial: Route }) {
         onOpenModels={() => hostCommand({ name: "openModels" })}
         onOpenEnvironments={() => hostCommand({ name: "openEnvironments" })}
         onOpenHub={() => hostCommand({ name: "openHub" })}
+        onOpenData={() => hostCommand({ name: "openData" })}
+        onOpenBuilder={() => hostCommand({ name: "openBuilder" })}
         onAddMachine={() => setMachineDialog({})}
       />
     );
@@ -96,6 +101,22 @@ function App({ initial }: { initial: Route }) {
         onRun={(machineId) => (state.project ? setNewRun({ machineId }) : hostCommand({ name: "newRun", machineId }))}
         onEnvironments={(machineId) => hostCommand({ name: "openEnvironments", machineId })}
       />
+    );
+  } else if (route.view === "data") {
+    body = <Data state={state} onOpenRun={(runId) => hostCommand({ name: "openRun", runId })} />;
+  } else if (route.view === "builder") {
+    body = <ModelBuilder state={state} importFile={route.importFile ?? null} onTrain={(command, machineId) => setNewRun({ command, machineId })} onOpenData={() => hostCommand({ name: "openData" })} />;
+  } else if (route.view === "themes") {
+    body = (
+      <div className="page">
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">Themes</h1>
+            <div className="page-sub">One choice styles everything: the editor, sidebars and every Converlt page.</div>
+          </div>
+        </div>
+        <ThemeGallery fallback={state.settings.theme} />
+      </div>
     );
   } else if (route.view === "alerts") {
     body = <PhoneAlerts state={state} />;

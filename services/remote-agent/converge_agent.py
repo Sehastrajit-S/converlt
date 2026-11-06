@@ -63,6 +63,7 @@ try:
     out["torch"] = torch.__version__
     out["torchCuda"] = torch.version.cuda
     out["cudaAvailable"] = bool(torch.cuda.is_available())
+    out["mpsAvailable"] = bool(getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available())
     if out["cudaAvailable"]:
         out["torchArchList"] = list(torch.cuda.get_arch_list())
         out["gpuCapability"] = "%d.%d" % torch.cuda.get_device_capability(0)
@@ -154,6 +155,17 @@ def run_cmd(args, timeout=15, shell_login=False):
 
 def shell_quote(s):
     return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def with_interpreter(command, python):
+    """Runs `command` with the machine's chosen interpreter: `python`/`python3` in the command
+    mean that interpreter, and its bin directory (venv tools like torchrun, accelerate) comes
+    first on PATH. Without this, `python train.py` fails on distros that ship only python3."""
+    if not python or python in ("python", "python3"):
+        return command
+    py = expand_path(python)
+    q = shell_quote(py)
+    return 'export PATH=%s:"$PATH"; python() { %s "$@"; }; python3() { %s "$@"; }; %s' % (shell_quote(os.path.dirname(py)), q, q, command)
 
 
 # ---------------------------------------------------------------- hardware
@@ -478,7 +490,7 @@ class Supervisor:
 
         try:
             self.proc = subprocess.Popen(
-                ["bash", "-lc", m["command"]],
+                ["bash", "-lc", with_interpreter(m["command"], m.get("python"))],
                 cwd=workdir,
                 env=env,
                 stdin=subprocess.DEVNULL,
@@ -698,6 +710,17 @@ class Supervisor:
             self.nan_detail = dict(rec.get("data") or {})
             if "nan" in self.reported:
                 self.events.emit("diagnostic", kind="nan", severity="error", message="Non-finite value detected.", step=None, data=self.nan_detail)
+        elif kind == "weights":
+            tensors = rec.get("tensors")
+            if isinstance(tensors, list) and tensors:
+                step = rec.get("step")
+                step = int(step) if isinstance(step, (int, float)) and not isinstance(step, bool) else None
+                extra = {"predictions": rec["predictions"][:8]} if isinstance(rec.get("predictions"), list) else {}
+                self.events.emit("weights", step=step, tensors=tensors[:160], **extra)
+        elif kind == "examples":
+            inputs = rec.get("inputs")
+            if isinstance(inputs, list) and inputs:
+                self.events.emit("examples", inputs=inputs[:8], labels=(rec.get("labels") or [])[:8], shape=rec.get("shape"), classNames=(rec.get("classNames") or [])[:1000])
         elif kind == "perf":
             self.on_data_window(rec)
         elif kind == "input":
@@ -885,6 +908,21 @@ class Supervisor:
 # ---------------------------------------------------------------- commands
 
 
+def apple_gpu():
+    """Apple silicon's GPU as a GPU sample: it uses the machine's unified memory."""
+    name, total = "Apple GPU", 0
+    try:
+        rc, out = run_cmd(["sysctl", "-n", "machdep.cpu.brand_string"], timeout=5)
+        if rc == 0 and out.strip():
+            name = "%s GPU" % out.strip()
+        rc, out = run_cmd(["sysctl", "-n", "hw.memsize"], timeout=5)
+        if rc == 0 and out.strip().isdigit():
+            total = int(out.strip()) // (1024 * 1024)
+    except Exception:
+        pass
+    return {"index": 0, "name": name, "memUsedMiB": 0, "memTotalMiB": total, "utilPct": None, "tempC": None, "powerW": None}
+
+
 def cmd_probe(args):
     workdir = expand_path(args.workdir or "~/converge")
     gpus = query_gpus()
@@ -900,12 +938,22 @@ def cmd_probe(args):
         writable = True
     except OSError:
         pass
+    mps = bool(py.get("mpsAvailable")) and not gpus
+    if mps:  # Apple silicon: the GPU shares the machine's memory and needs no driver
+        accel = [{"name": "Apple GPU (MPS)", "ok": True, "detail": "PyTorch %s uses the Metal GPU" % py.get("torch")}]
+    elif not gpus and getattr(args, "cpu_ok", False):
+        accel = [{"name": "GPU", "ok": True, "detail": "none found: training runs on the CPU (fine for small models and checks)"}]
+    else:
+        accel = [
+            {"name": "NVIDIA driver", "ok": bool(gpus), "detail": ("driver %s" % gpus[0]["driver"]) if gpus else "nvidia-smi not found or no GPUs"},
+            {"name": "CUDA in PyTorch", "ok": bool(py.get("cudaAvailable")), "detail": ("CUDA %s" % py.get("torchCuda")) if py.get("cudaAvailable") else "unavailable"},
+        ]
     checks = [
         {"name": "Python 3.8+ for agent", "ok": sys.version_info >= (3, 8), "detail": sys.version.split()[0]},
-        {"name": "NVIDIA driver", "ok": bool(gpus), "detail": ("driver %s" % gpus[0]["driver"]) if gpus else "nvidia-smi not found or no GPUs"},
+        accel[0],
         {"name": "Training Python", "ok": bool(py.get("python")), "detail": py.get("pythonPath") or py.get("torchError") or "not found"},
         {"name": "PyTorch", "ok": bool(py.get("torch")), "detail": py.get("torch") or py.get("torchError") or "not installed"},
-        {"name": "CUDA in PyTorch", "ok": bool(py.get("cudaAvailable")), "detail": ("CUDA %s" % py.get("torchCuda")) if py.get("cudaAvailable") else "unavailable"},
+        *accel[1:],
         {"name": "Disk space", "ok": (host["diskFreeGiB"] or 0) >= 10, "detail": "%s GiB free" % host["diskFreeGiB"]},
         {"name": "Working directory", "ok": writable, "detail": workdir},
     ]
@@ -917,7 +965,7 @@ def cmd_probe(args):
             "hostname": socket.gethostname(),
             "platform": sys.platform,
             "os": " ".join(os.uname()) if hasattr(os, "uname") else sys.platform,
-            "gpus": gpu_samples(gpus),
+            "gpus": gpu_samples(gpus) or ([apple_gpu()] if mps else []),
             "driver": gpus[0]["driver"] if gpus else None,
             "cudaVersion": cuda_driver_version(),
             "gpuCapability": py.get("gpuCapability") or gpu_capability(),
@@ -1083,6 +1131,7 @@ def main(argv=None):
     p = sub.add_parser("probe")
     p.add_argument("--workdir")
     p.add_argument("--python")
+    p.add_argument("--cpu-ok", action="store_true", help="a machine without a GPU still counts as ready (this computer)")
     sub.add_parser("start")
     for name in ("status", "cancel", "supervise"):
         sub.add_parser(name).add_argument("run_id")

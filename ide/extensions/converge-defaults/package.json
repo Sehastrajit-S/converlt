@@ -20,10 +20,40 @@
         "path": "./themes/converge-dark.json"
       },
       {
+        "id": "Converlt Midnight",
+        "label": "Converlt Midnight",
+        "uiTheme": "vs-dark",
+        "path": "./themes/converge-midnight.json"
+      },
+      {
+        "id": "Converlt Ember",
+        "label": "Converlt Ember",
+        "uiTheme": "vs-dark",
+        "path": "./themes/converge-ember.json"
+      },
+      {
+        "id": "Converlt Forest",
+        "label": "Converlt Forest",
+        "uiTheme": "vs-dark",
+        "path": "./themes/converge-forest.json"
+      },
+      {
         "id": "Converlt Light",
         "label": "Converlt Light",
         "uiTheme": "vs",
         "path": "./themes/converge-light.json"
+      },
+      {
+        "id": "Converlt Paper",
+        "label": "Converlt Paper",
+        "uiTheme": "vs",
+        "path": "./themes/converge-paper.json"
+      },
+      {
+        "id": "Converlt High Contrast",
+        "label": "Converlt High Contrast",
+        "uiTheme": "hc-black",
+        "path": "./themes/converge-high-contrast.json"
       }
     ],
     "configurationDefaults": {

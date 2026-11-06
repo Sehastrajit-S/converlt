@@ -3,7 +3,7 @@
 //   node scripts/build.mjs [--watch]
 import { build, context } from "esbuild";
 import { existsSync } from "node:fs";
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,9 +24,11 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(path.join(dist, "remote/agent"), { recursive: true });
 await mkdir(path.join(dist, "remote/sdk/converge"), { recursive: true });
 await cp(path.join(repo, "services/remote-agent/converge_agent.py"), path.join(dist, "remote/agent/converge_agent.py"));
+await cp(path.join(repo, "services/remote-agent/converge_data.py"), path.join(dist, "remote/agent/converge_data.py"));
+await cp(path.join(repo, "services/remote-agent/converge_import.py"), path.join(dist, "remote/agent/converge_import.py"));
 // The SDK package plus sitecustomize.py, which installs the zero-setup hooks for Converlt runs.
-for (const f of ["__init__.py", "_inputs.py", "_autohook.py"])
-  await cp(path.join(repo, "python/converge-runtime/converge", f), path.join(dist, "remote/sdk/converge", f));
+const sdkSrc = path.join(repo, "python/converge-runtime/converge");
+for (const f of (await readdir(sdkSrc)).filter((f) => f.endsWith(".py"))) await cp(path.join(sdkSrc, f), path.join(dist, "remote/sdk/converge", f));
 await cp(path.join(repo, "python/converge-runtime/sitecustomize.py"), path.join(dist, "remote/sdk/sitecustomize.py"));
 
 const common = { bundle: true, sourcemap: true, logLevel: "info", minify: !watch };

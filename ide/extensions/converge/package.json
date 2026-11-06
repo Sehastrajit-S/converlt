@@ -210,6 +210,30 @@
         "icon": "$(dashboard)"
       },
       {
+        "command": "converge.openData",
+        "title": "Open Data (Load, Explore, Preprocess)",
+        "category": "Converlt",
+        "icon": "$(table)"
+      },
+      {
+        "command": "converge.openModelBuilder",
+        "title": "Open Model Builder",
+        "category": "Converlt",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "converge.openFileAsGraph",
+        "title": "Open Model as Graph",
+        "category": "Converlt",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "converge.openThemes",
+        "title": "Choose Theme",
+        "category": "Converlt",
+        "icon": "$(symbol-color)"
+      },
+      {
         "command": "converge.setupPhoneAlerts",
         "title": "Set Up Phone Alerts",
         "category": "Converlt",
@@ -318,7 +342,19 @@
           "group": "1_machine@2"
         }
       ],
+      "editor/context": [
+        {
+          "command": "converge.openFileAsGraph",
+          "when": "resourceLangId == python",
+          "group": "converlt@1"
+        }
+      ],
       "editor/title": [
+        {
+          "command": "converge.openFileAsGraph",
+          "when": "resourceLangId == python",
+          "group": "navigation@90"
+        },
         {
           "command": "converge.runFile",
           "when": "resourceLangId == python",
@@ -326,6 +362,11 @@
         }
       ],
       "explorer/context": [
+        {
+          "command": "converge.openFileAsGraph",
+          "when": "resourceExtname == .py",
+          "group": "converlt@1"
+        },
         {
           "command": "converge.runFile",
           "when": "resourceLangId == python",

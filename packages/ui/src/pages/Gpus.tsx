@@ -3,8 +3,8 @@ import { Boxes, Clock, Cpu, LoaderCircle, Play, Power, Rocket, Search, Server, S
 import type { RunOptions } from "@converge/run-protocol";
 import type { AppState, CloudPodView } from "@converge/core/api";
 import { POD_IMAGES, type CloudType, type GpuOffer, type WalletSummary } from "@converge/core/cloud";
-import { api, errorMessage } from "../api.ts";
-import { creditsUsd, formatCredits, formatHours, usePods } from "../cloud.ts";
+import { api, errorMessage, ask } from "../api.ts";
+import { creditsUsd, formatCredits, formatHours, TIER, usePods } from "../cloud.ts";
 import { Dialog, Segmented, Switch, useToast } from "../components/ui.tsx";
 import { CloudGate } from "./Wallet.tsx";
 
@@ -112,9 +112,9 @@ function GpusBody({ state, wallet, reloadWallet, preselect, onRun, onEnvironment
           value={cloud}
           onChange={setCloud}
           options={[
-            { value: "all", label: "All clouds" },
-            { value: "SECURE", label: "Secure" },
-            { value: "COMMUNITY", label: "Community" },
+            { value: "all", label: "All tiers" },
+            { value: "SECURE", label: TIER.SECURE.short },
+            { value: "COMMUNITY", label: TIER.COMMUNITY.short },
           ]}
         />
         <Segmented<VramFilter>
@@ -163,9 +163,9 @@ function GpusBody({ state, wallet, reloadWallet, preselect, onRun, onEnvironment
                 .sort((a, b) => (a.cloud === "SECURE" ? -1 : 1) - (b.cloud === "SECURE" ? -1 : 1))
                 .map((o) => (
                   <div key={o.cloud} className="offer-row">
-                    <span className="offer-cloud" title={o.cloud === "SECURE" ? "Tier 3+ data centers" : "Vetted community hosts, cheaper"}>
+                    <span className="offer-cloud" title={TIER[o.cloud].note}>
                       {o.cloud === "SECURE" ? <ShieldCheck size={13} /> : <Users size={13} />}
-                      {o.cloud === "SECURE" ? "Secure" : "Community"}
+                      {TIER[o.cloud].short}
                     </span>
                     <StockDot stock={o.stock} />
                     <span className="spacer" />
@@ -270,7 +270,7 @@ function PodCard({
           </div>
           <div className="faint truncate" style={{ fontSize: 12, marginTop: 2 }}>
             {pod.gpuCount > 1 ? `${pod.gpuCount}× ` : ""}
-            {pod.gpuName} · {pod.cloud === "SECURE" ? "Secure" : "Community"} · {POD_IMAGES.find((i) => i.id === pod.image)?.label ?? pod.image}
+            {pod.gpuName} · {TIER[pod.cloud].name} · {POD_IMAGES.find((i) => i.id === pod.image)?.label ?? pod.image}
           </div>
         </div>
       </div>
@@ -325,7 +325,7 @@ function PodCard({
           className="btn ghost sm icon"
           disabled={!!busy}
           title="Terminate: deletes the pod and its volume"
-          onClick={() => confirm(`Terminate ${pod.name}? The pod and its /workspace volume are deleted. Billing stops.`) && act("Terminate", () => api.gpuTerminate(pod.id))}
+          onClick={async () => (await ask(`Terminate ${pod.name}? The pod and its /workspace volume are deleted. Billing stops.`, "Terminate")) && act("Terminate", () => api.gpuTerminate(pod.id))}
         >
           {busy === "Terminate" ? <LoaderCircle size={13} className="spin" /> : <Trash2 size={14} />}
         </button>
@@ -397,7 +397,7 @@ function LaunchDialog({ offer, wallet, thenRun, onClose, onLaunched }: { offer: 
             {n}× {offer.name}
           </b>
           <div className="faint" style={{ fontSize: 12 }}>
-            {offer.memoryGb * n} GB VRAM · {offer.cloud === "SECURE" ? "Secure cloud" : "Community cloud"}
+            {offer.memoryGb * n} GB VRAM · {TIER[offer.cloud].name}
           </div>
         </div>
         <div style={{ textAlign: "right" }}>

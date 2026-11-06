@@ -1,9 +1,18 @@
 import * as vscode from "vscode";
+import { THEMES } from "@converge/ui/themes";
+
+function readUiTheme(): { current: string; followSystem: boolean } {
+  return {
+    current: vscode.workspace.getConfiguration("workbench").get<string>("colorTheme") ?? "Converlt Dark",
+    followSystem: vscode.workspace.getConfiguration("window").get<boolean>("autoDetectColorScheme") ?? false,
+  };
+}
 import type { Machine, RunStatus } from "@converge/run-protocol";
 import { ConvergeService, DEFAULT_SETTINGS, LocalGateway, type AppState, type InvokeMethod, type ProbeResult, type Settings } from "@converge/core";
 
 const MACHINES_KEY = "converge.machines";
 const PROBES_KEY = "converge.probes";
+const DISMISSED_LOCAL_KEY = "converge.dismissedLocalGpus";
 const CLOUD_SECRET = "converge.cloud";
 
 export function readSettings(): Settings {
@@ -113,6 +122,11 @@ export class Host implements vscode.Disposable {
           await ctx.globalState.update(MACHINES_KEY, machines);
           await ctx.globalState.update(PROBES_KEY, probes);
         },
+        dismissedLocal: () => ctx.globalState.get<string[]>(DISMISSED_LOCAL_KEY, []),
+        dismissLocal: async (host) => {
+          const list = ctx.globalState.get<string[]>(DISMISSED_LOCAL_KEY, []);
+          if (!list.includes(host)) await ctx.globalState.update(DISMISSED_LOCAL_KEY, [...list, host]);
+        },
       },
       // The gateway URL and token live in VS Code's SecretStorage (the OS keychain).
       cloud: {
@@ -173,6 +187,7 @@ export class Host implements vscode.Disposable {
     addMachine: (input) => this.service.addMachine(input),
     updateMachine: (id, input) => this.service.updateMachine(id, input),
     removeMachine: (id) => this.service.removeMachine(id),
+    discoverLocalMachines: () => this.service.discoverLocalMachines(),
     probeMachine: (id) => this.service.probeMachine(id),
     machineTelemetry: (id) => this.service.machineTelemetry(id),
 
@@ -204,6 +219,28 @@ export class Host implements vscode.Disposable {
     removeEnv: (id, name) => this.service.removeEnv(id, name),
     useEnv: (id, python) => this.service.useEnv(id, python),
     // An untrusted folder's requirements.txt isn't offered for installation.
+    dataList: () => this.service.dataList(),
+    dataSyncHub: () => this.service.dataSyncHub(),
+    dataSave: (d) => this.service.dataSave(d),
+    dataRemove: (id) => this.service.dataRemove(id),
+    dataBrowse: (machineId, dir) => this.service.dataBrowse(machineId, dir),
+    dataProfile: (id) => this.service.dataProfile(id),
+    dataPreview: (id) => this.service.dataPreview(id),
+    dataWriteCode: async (id) => {
+      await requireTrust("save data scripts into this folder");
+      return this.service.dataWriteCode(id);
+    },
+    dataRunPreprocess: async (id) => {
+      await requireTrust("run preprocessing");
+      return this.service.dataRunPreprocess(id);
+    },
+    builderList: () => this.service.builderList(),
+    builderCodeFiles: () => this.service.builderCodeFiles(),
+    builderImport: (req) => this.service.builderImport(req),
+    builderSave: async (graph, train) => {
+      await requireTrust("save the model into this folder");
+      return this.service.builderSave(graph, train);
+    },
     projectRequirements: async () => (vscode.workspace.isTrusted ? this.service.projectRequirements() : null),
 
     hubSearch: (source, kind, query) => this.service.hubSearch(source, kind, query),
@@ -238,6 +275,19 @@ export class Host implements vscode.Disposable {
     agentsStatus: () => this.service.agentsStatus(),
     agentsConnect: (which) => this.service.agentsConnect(which),
     modelComplete: (model, prompt) => this.service.modelComplete(model, prompt),
+    confirmAction: async (message: string, confirmLabel: string) => (await vscode.window.showWarningMessage(message, { modal: true }, confirmLabel)) === confirmLabel,
+    uiTheme: async () => readUiTheme(),
+    setUiTheme: async (change: { theme?: string; followSystem?: boolean }) => {
+      const g = vscode.ConfigurationTarget.Global;
+      if (change.theme) {
+        const t = THEMES.find((x) => x.id === change.theme);
+        await vscode.workspace.getConfiguration("workbench").update("colorTheme", change.theme, g);
+        // Remember it as the preferred one of its kind, so following the OS keeps the choice.
+        if (t) await vscode.workspace.getConfiguration("workbench").update(t.type === "light" ? "preferredLightColorTheme" : "preferredDarkColorTheme", change.theme, g);
+      }
+      if (change.followSystem !== undefined) await vscode.workspace.getConfiguration("window").update("autoDetectColorScheme", change.followSystem, g);
+      return readUiTheme();
+    },
   };
 
   dispose(): void {

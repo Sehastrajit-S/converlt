@@ -187,6 +187,53 @@ export interface InputEvent extends BaseEvent {
   source?: "sdk" | "auto";
 }
 
+/** One parameter tensor at one point in training (from run.watch(model)). */
+export interface WeightTensor {
+  /** Parameter name, e.g. "conv1.weight"; the part before the first dot is the module. */
+  name: string;
+  shape: number[];
+  numel: number;
+  mean: number;
+  std: number;
+  absMax: number;
+  /** NaN/Inf entries; the statistics cover the finite ones. */
+  nonFinite?: number;
+  gradNorm?: number | null;
+  /** Value distribution over [min, max]. */
+  hist: { min: number; max: number; counts: number[] };
+  /** The weight matrix (rows = output units) averaged down to at most 12×24 cells. */
+  grid?: number[][];
+}
+
+export interface WeightsEvent extends BaseEvent {
+  type: "weights";
+  step: number | null;
+  tensors: WeightTensor[];
+  /** The model's outputs for the recorded examples at this step, in the same order. */
+  predictions?: ExamplePrediction[];
+}
+
+/** One example drawn for the UI (no batch dimension). */
+export type ExampleVisual =
+  | { kind: "image" | "recon:image"; w: number; h: number; c: number; data: string; frames?: number }
+  | { kind: "tokens" | "recon:tokens"; ids: number[]; length: number }
+  | { kind: "wave" | "recon:wave"; min: number[]; max: number[] }
+  | { kind: "heatmap" | "recon:heatmap"; rows: number; cols: number; values: number[][]; shape: number[] }
+  | { kind: "vector" | "recon:vector"; values: number[]; length: number };
+
+export type ExampleLabel = { class: number; name: string | null } | { value: number } | { values: number[] };
+
+export type ExamplePrediction = ExampleVisual | { class: number; p: number } | { value: number; p: number } | { tokens: number[] } | { values: number[] };
+
+/** A few training inputs recorded once, shown above the weights. */
+export interface ExamplesEvent extends BaseEvent {
+  type: "examples";
+  inputs: ExampleVisual[];
+  labels: ExampleLabel[];
+  shape: number[] | null;
+  classNames: string[];
+}
+
 export interface TelemetryEvent extends BaseEvent {
   type: "telemetry";
   gpus: GpuSample[];
@@ -219,7 +266,9 @@ export type RunEvent =
   | TelemetryEvent
   | DiagnosticEvent
   | ArtifactEvent
-  | InputEvent;
+  | InputEvent
+  | WeightsEvent
+  | ExamplesEvent;
 
 /** Lines emitted by `agent tail` that are not persisted run events. */
 export type TailControlLine =

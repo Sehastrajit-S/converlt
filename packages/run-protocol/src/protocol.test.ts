@@ -122,3 +122,13 @@ test("helpers", () => {
   assert.deepEqual(estimateCost(2, 0, 1800), { hours: 0.5, usd: 1 });
   assert.equal(estimateCost(undefined, 0, 3600).usd, null);
 });
+
+test("multi-GPU launch: torchrun on every GPU for a plain script command, and back", async () => {
+  const { multiGpuCommand, parseMultiGpu } = await import("./index.ts");
+  const multi = multiGpuCommand("python train_cnn.py --epochs 3", 4)!;
+  assert.equal(multi, "python -m torch.distributed.run --standalone --nproc_per_node=4 train_cnn.py --epochs 3");
+  assert.deepEqual(parseMultiGpu(multi), { gpus: 4, single: "python train_cnn.py --epochs 3" });
+  assert.equal(multiGpuCommand("python train.py", 1), null, "one GPU: nothing to spread");
+  assert.equal(multiGpuCommand("bash run.sh", 8), null);
+  assert.equal(multiGpuCommand(multi, 8), null, "already multi-GPU");
+});

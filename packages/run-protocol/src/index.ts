@@ -7,3 +7,8 @@ export * from "./cost.ts";
 export * from "./explain.ts";
 export * from "./forecast.ts";
 export * from "./envcheck.ts";
+export * from "./modelgraph.ts";
+export * from "./data.ts";
+export * from "./weights.ts";
+export * from "./training.ts";
+export * from "./codeimport.ts";

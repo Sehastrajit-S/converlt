@@ -1,8 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Activity, ArrowRight, Bot, CircleCheck, Plug, Boxes, Cloud, Code2, Coins, Cpu, Database, FlaskConical, FolderOpen, Play, Plus, Rocket, Server, Sparkles } from "lucide-react";
-import type { AgentsStatus, AppState, RunListItem } from "@converge/core/api";
-import { api, errorMessage } from "../api.ts";
-import { useToast } from "../components/ui.tsx";
+import type { ReactNode } from "react";
+import { Activity, ArrowRight, Boxes, Cloud, Code2, Coins, Cpu, Database, FlaskConical, FolderOpen, Play, Plus, Network, Rocket, Server, Sparkles, Table2 } from "lucide-react";
+import type { AppState, RunListItem } from "@converge/core/api";
 import { formatCredits, formatHours, useCloudStatus, usePods, useWallet } from "../cloud.ts";
 import { StatusPill } from "../components/ui.tsx";
 import { formatDuration, formatNumber, timeAgo } from "../format.ts";
@@ -17,6 +15,8 @@ export interface HomeActions {
   onOpenEnvironments: () => void;
   onOpenHub?: () => void;
   onAddMachine: () => void;
+  onOpenBuilder?: () => void;
+  onOpenData?: () => void;
   /** Dashboard mode (Converlt IDE): the page owns the window and lists projects. */
   dashboard?: boolean;
   onShowCode?: () => void;
@@ -97,7 +97,7 @@ export function Home({ state, runs, ...a }: { state: AppState; runs: RunListItem
           <b className="tabular">
             {ready}/{state.machines.length}
           </b>
-          <span>{state.machines.length ? "SSH, WSL and cloud pods" : "Add one or launch a GPU"}</span>
+          <span>{state.machines.length ? "This computer, servers and cloud GPUs" : "Add one or launch a GPU"}</span>
         </Kpi>
       </div>
 
@@ -134,7 +134,32 @@ export function Home({ state, runs, ...a }: { state: AppState; runs: RunListItem
         </div>
       )}
 
-      <AgentsCard />
+      {(a.onOpenData || a.onOpenBuilder) && (
+        <div className="workflow-cards">
+          {a.onOpenData && (
+            <WorkflowCard
+              icon={<Table2 size={26} />}
+              title="Data"
+              sub="Explore a dataset on your GPU machine, fix what's wrong with it, and get a loader for training."
+              steps={["EDA: leakage, missing values, imbalance", "Preprocess, fitted on train only", "Load: PyTorch DataLoader code"]}
+              cta="Open Data"
+              onClick={a.onOpenData}
+              disabled={!state.project}
+              hint={state.project ? undefined : "Open a project first"}
+            />
+          )}
+          {a.onOpenBuilder && (
+            <WorkflowCard
+              icon={<Network size={26} />}
+              title="Model Builder"
+              sub="Drag and drop layers into a network. Shapes and parameter counts are checked as you wire it up."
+              steps={["40 templates: text, tables, images, video, audio, time series, generative", "Open any PyTorch model as a graph", "Train on every GPU of a machine"]}
+              cta="Open Model Builder"
+              onClick={a.onOpenBuilder}
+            />
+          )}
+        </div>
+      )}
 
       <div className="home-grid">
         <div className="card">
@@ -146,7 +171,7 @@ export function Home({ state, runs, ...a }: { state: AppState; runs: RunListItem
             <Action icon={<FlaskConical size={18} />} title="New training run" sub="Sync code, run, watch metrics" onClick={a.onNewRun} disabled={!state.project} />
             <Action icon={<Boxes size={18} />} title="Environments" sub="venv, conda, packages, CUDA" onClick={a.onOpenEnvironments} />
             <Action icon={<Sparkles size={18} />} title="Models" sub="Any LLM, one endpoint, your credits" onClick={a.onOpenModels} />
-            <Action icon={<Plus size={18} />} title="Bring a machine" sub="Your own server over SSH or WSL" onClick={a.onAddMachine} />
+            <Action icon={<Plus size={18} />} title="Bring a machine" sub="This computer, or your server over SSH" onClick={a.onAddMachine} />
             {a.onOpenHub ? (
               <Action icon={<Database size={18} />} title="Datasets & models" sub="Hugging Face and Kaggle, onto your GPU" onClick={a.onOpenHub} />
             ) : (
@@ -213,44 +238,27 @@ function Action({ icon, title, sub, onClick, disabled }: { icon: ReactNode; titl
   );
 }
 
-/** Claude Code and Codex in the editor get Converlt's tools through the Converlt MCP server. */
-function AgentsCard() {
-  const toast = useToast();
-  const [status, setStatus] = useState<AgentsStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    api.agentsStatus().then(setStatus, () => {});
-  }, []);
-  if (!status) return null;
-  const both = status.claudeCode && status.codex;
-  const connect = async () => {
-    setBusy(true);
-    try {
-      const st = await api.agentsConnect({ claudeCode: true, codex: true });
-      setStatus(st);
-      toast("success", "Converlt tools added for Claude Code and Codex", "Start a new agent session to use them.");
-    } catch (e) {
-      toast("error", "Could not connect the agents", errorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+function WorkflowCard(p: { icon: ReactNode; title: string; sub: string; steps: string[]; cta: string; onClick: () => void; disabled?: boolean; hint?: string }) {
   return (
-    <div className="card agents-card">
-      <span className="action-icon">
-        <Bot size={18} />
-      </span>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <b>Claude Code & Codex</b>
-        <div className="faint" style={{ fontSize: 12.5, marginTop: 2 }}>
-          Give your coding agents Converlt's tools: read runs and failure diagnoses, find datasets on your GPUs, and launch training with your approval.
+    <div className="card workflow-card">
+      <span className="workflow-icon">{p.icon}</span>
+      <div className="workflow-text">
+        <b>{p.title}</b>
+        <div className="faint">{p.sub}</div>
+        <div className="workflow-steps">
+          {p.steps.map((t) => (
+            <span key={t} className="tag">
+              {t}
+            </span>
+          ))}
         </div>
       </div>
-      <span className={`tag ${status.claudeCode ? "ok" : ""}`}>{status.claudeCode && <CircleCheck size={10} />} Claude Code</span>
-      <span className={`tag ${status.codex ? "ok" : ""}`}>{status.codex && <CircleCheck size={10} />} Codex</span>
-      <button className={`btn ${both ? "ghost" : "primary"} sm`} disabled={busy} onClick={() => void connect()}>
-        <Plug size={13} /> {both ? "Reconnect" : "Connect"}
-      </button>
+      <div className="workflow-go">
+        <button className="btn primary" disabled={p.disabled} onClick={p.onClick}>
+          {p.cta} <ArrowRight size={14} />
+        </button>
+        {p.hint && <span className="faint">{p.hint}</span>}
+      </div>
     </div>
   );
 }

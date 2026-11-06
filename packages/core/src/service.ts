@@ -1,8 +1,30 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { explainRuns, patchByFile, type CodeChanges, type Machine, type RunExplanation, type RunNotes, type RunOptions, type RunStatus } from "@converge/run-protocol";
+import {
+  analyzeGraph,
+  dataStem,
+  datasetSpec,
+  explainRuns,
+  generateLoaderCode,
+  generatePreprocessCode,
+  fileStem,
+  generateModelCode,
+  generateTrainCode,
+  importedToGraph,
+  multiGpuCommand,
+  patchByFile,
+  type CodeChanges,
+  type DataProfile,
+  type DatasetRef,
+  type Machine,
+  type ModelGraph,
+  type RunExplanation,
+  type RunNotes,
+  type RunOptions,
+  type RunStatus,
+} from "@converge/run-protocol";
 import { EXPLAIN_MODEL, explainPrompt } from "./explainPrompt.ts";
 import type {
   CloudPodView,
@@ -27,6 +49,13 @@ import type {
   RunView,
   Settings,
   TelemetryResult,
+  BrowseResult,
+  BuilderDesign,
+  DataCodePaths,
+  PreprocessPreview,
+  DatasetView,
+  BuilderImportResult,
+  BuilderSaveResult,
 } from "./api.ts";
 import { AgentClient } from "./agentClient.ts";
 import type { CloudPod, CloudStatus, GpuOffer, LaunchPodRequest, LedgerEntry, ModelInfo, SpendLimits, WalletSummary } from "./cloudApi.ts";
@@ -36,12 +65,15 @@ import { agentsStatus, connectAgents, type McpLaunch } from "./agents.ts";
 import { checkPython, CLOUD_ENV_ROOT, ENV_ROOT, EnvManager } from "./envs.ts";
 import { installWatchdog } from "./watchdog.ts";
 import { publishNtfy } from "./phoneAlerts.ts";
+import { DataTools } from "./dataTools.ts";
+import { importModel, modelFiles, projectPythonFiles, type ImportRequest } from "./codeImport.ts";
+import { detectLocalGpus, detectThisComputer } from "./localGpus.ts";
 
 export const DEFAULT_IDLE_STOP_MINUTES = 30;
 import { CLOUD_HUB_ROOT, HUB_ROOT, HubManager, hubDetails, hubSearch, type HubSecrets } from "./hub.ts";
 import { changedFiles, currentBranch, diffCommits, diffFiles, isGitRepo } from "./git.ts";
 import { RunManager, type TransportFactory } from "./runManager.ts";
-import { explainSshError, parseWslHost, transportFor } from "./transport.ts";
+import { explainSshError, isLocalHost, LOCAL_HOST, parseWslHost, transportFor } from "./transport.ts";
 
 /** A run to start on a pod once it's up. */
 export interface PendingRun {
@@ -54,6 +86,9 @@ export interface PendingRun {
 export interface MachineStore {
   load(): { machines: Machine[]; probes: Record<string, ProbeResult> };
   save(machines: Machine[], probes: Record<string, ProbeResult>): Promise<void>;
+  /** Hosts of local GPUs the user removed, so discovery doesn't add them back. */
+  dismissedLocal?(): string[];
+  dismissLocal?(host: string): Promise<void>;
 }
 
 export interface ServiceHooks {
@@ -96,7 +131,7 @@ export function validateMachine(input: MachineInput): MachineInput {
   if (input.port !== undefined && (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535)) throw new Error("Invalid port");
   if (input.hourlyRate !== undefined && (!(input.hourlyRate >= 0) || input.hourlyRate > 1000)) throw new Error("Invalid hourly rate");
   return {
-    name: input.name.trim() || (parseWslHost(host) ? `Local GPU (${parseWslHost(host)})` : host),
+    name: input.name.trim() || (isLocalHost(host) ? "This computer" : parseWslHost(host) ? `Local GPU (${parseWslHost(host)})` : host),
     host,
     port: input.port,
     identityFile: input.identityFile?.trim() || undefined,
@@ -217,9 +252,53 @@ export class ConvergeService {
   }
 
   async removeMachine(id: string): Promise<void> {
+    const removed = this.machines.find((m) => m.id === id);
+    if (removed && (parseWslHost(removed.host) || isLocalHost(removed.host))) await this.opts.store.dismissLocal?.(removed.host);
     this.machines = this.machines.filter((m) => m.id !== id);
     delete this.probes[id];
     await this.persist();
+  }
+
+  /**
+   * Adds this computer's GPUs (WSL distributions that see one) as machines, unless they're
+   * registered already or the user removed them. Returns the machines it added.
+   */
+  async discoverLocalMachines(): Promise<Machine[]> {
+    const dismissed = new Set(this.opts.store.dismissedLocal?.() ?? []);
+    const added: Machine[] = [];
+    for (const g of await detectLocalGpus()) {
+      const host = `wsl:${g.distro}`;
+      if (dismissed.has(host) || this.machines.some((m) => m.host.toLowerCase() === host.toLowerCase())) continue;
+      const gpu = g.gpus[0]!.replace(/^NVIDIA (GeForce )?/, "");
+      const m: Machine = { id: randomUUID(), createdAt: Date.now(), name: `This PC · ${g.gpus.length > 1 ? `${g.gpus.length}× ` : ""}${gpu}`, host, python: g.python };
+      this.machines = [...this.machines, m];
+      added.push(m);
+    }
+    // macOS and Linux: this computer itself, with its NVIDIA or Apple GPU, or its CPU.
+    if (process.platform !== "win32" && !dismissed.has(LOCAL_HOST) && !this.machines.some((m) => isLocalHost(m.host))) {
+      const me = await detectThisComputer().catch(() => null);
+      if (me && me.accelerator !== "none") {
+        const what = me.gpus.length ? `${me.gpus.length > 1 ? `${me.gpus.length}× ` : ""}${me.gpus[0]!.replace(/^NVIDIA (GeForce )?/, "")}` : "CPU";
+        const m: Machine = { id: randomUUID(), createdAt: Date.now(), name: `This computer · ${what}`, host: LOCAL_HOST, python: me.python };
+        this.machines = [...this.machines, m];
+        added.push(m);
+      }
+    }
+    if (added.length) {
+      await this.persist();
+      this.opts.hooks.stateChanged();
+      for (const m of added) void this.probeMachine(m.id).then(() => this.opts.hooks.stateChanged(), () => {});
+    }
+    return added;
+  }
+
+  detectLocalGpus() {
+    return detectLocalGpus();
+  }
+
+  /** macOS / Linux: this computer's GPU and best Python (null on Windows, which uses WSL). */
+  detectThisComputer() {
+    return detectThisComputer();
   }
 
   private agentFor(m: Machine): AgentClient {
@@ -237,7 +316,7 @@ export class ConvergeService {
     let result: ProbeResult;
     try {
       await client.install(this.opts.resourcesDir);
-      result = { ...(await client.probe(this.workdir())), ok: true, at: Date.now() };
+      result = { ...(await client.probe(this.workdir(), isLocalHost(m.host))), ok: true, at: Date.now() };
       if (m.cloudPodId) {
         const minutes = m.idleStopMinutes ?? DEFAULT_IDLE_STOP_MINUTES;
         const factory = this.opts.transportFactory ?? ((x) => transportFor(x, this.opts.settings().sshPath));
@@ -404,6 +483,257 @@ export class ConvergeService {
     } catch {
       return null;
     }
+  }
+
+  // ------------------------------------------------------------ data
+
+  private readonly dataInstalled = new Set<string>();
+
+  private datasetsFile(): string {
+    if (!this.project) throw new Error("Open a project folder first: its datasets are kept with it.");
+    return path.join(this.project.path, ".converge", "datasets.json");
+  }
+
+  private async readDatasets(): Promise<DatasetDb> {
+    try {
+      const raw = JSON.parse(await fs.readFile(this.datasetsFile(), "utf8"));
+      return { datasets: raw.datasets ?? [], profiles: raw.profiles ?? {}, dismissedHub: raw.dismissedHub ?? [] };
+    } catch {
+      return { datasets: [], profiles: {}, dismissedHub: [] };
+    }
+  }
+
+  private async writeDatasets(db: DatasetDb): Promise<void> {
+    await fs.mkdir(path.dirname(this.datasetsFile()), { recursive: true });
+    await fs.writeFile(this.datasetsFile(), JSON.stringify(db));
+  }
+
+  private datasetView(d: DatasetRef, db: DatasetDb): DatasetView {
+    const p = db.profiles[d.id];
+    return { dataset: d, profile: p?.profile ?? null, profiledAt: p?.at ?? null, machineName: this.machines.find((m) => m.id === d.machineId)?.name ?? null };
+  }
+
+  private async dataTools(machineId: string): Promise<DataTools> {
+    const m = this.findMachine(machineId);
+    const factory = this.opts.transportFactory ?? ((x) => transportFor(x, this.opts.settings().sshPath));
+    if (!this.dataInstalled.has(m.id)) {
+      await this.agentFor(m).install(this.opts.resourcesDir);
+      this.dataInstalled.add(m.id);
+    }
+    return new DataTools(factory(m), m.python, (s) => explainSshError(s, m.host));
+  }
+
+  private async findDataset(id: string): Promise<{ db: DatasetDb; d: DatasetRef }> {
+    const db = await this.readDatasets();
+    const d = db.datasets.find((x) => x.id === id);
+    if (!d) throw new Error("That dataset isn't registered in this project anymore.");
+    return { db, d };
+  }
+
+  async dataList(): Promise<DatasetView[]> {
+    if (!this.project) return [];
+    const db = await this.readDatasets();
+    return db.datasets.map((d) => this.datasetView(d, db)).sort((a, b) => b.dataset.addedAt - a.dataset.addedAt);
+  }
+
+  /**
+   * Adds datasets downloaded with Datasets & models (completed Hugging Face / Kaggle dataset jobs
+   * on machines that are reachable) to the project's Data list, unless they're registered
+   * already or the user removed them. Returns the ones it added.
+   */
+  async dataSyncHub(): Promise<DatasetView[]> {
+    if (!this.project) return [];
+    const machines = this.machines.filter((m) => this.probes[m.id]?.ok);
+    const found = await Promise.all(machines.map(async (m) => ({ m, jobs: await this.hubJobs(m.id).catch(() => [] as HubJob[]) })));
+    const db = await this.readDatasets();
+    const dismissed = new Set(db.dismissedHub ?? []);
+    const added: DatasetRef[] = [];
+    for (const { m, jobs } of found)
+      for (const j of jobs) {
+        if (j.kind !== "dataset" || j.status !== "completed") continue;
+        if (dismissed.has(`${m.id}:${j.path}`) || db.datasets.some((d) => d.machineId === m.id && d.path === j.path)) continue;
+        const d: DatasetRef = { id: randomUUID(), name: j.id, machineId: m.id, path: j.path, format: "unknown", steps: [], addedAt: j.endedAt ?? Date.now(), source: { hub: j.source, id: j.id } };
+        db.datasets.push(d);
+        added.push(d);
+      }
+    if (added.length) await this.writeDatasets(db);
+    return added.map((d) => this.datasetView(d, db));
+  }
+
+  async dataSave(input: Omit<DatasetRef, "id" | "addedAt"> & { id?: string }): Promise<DatasetView> {
+    if (!input.name.trim()) throw new Error("Give the dataset a name.");
+    const db = await this.readDatasets();
+    const existing = input.id ? db.datasets.find((d) => d.id === input.id) : undefined;
+    const d: DatasetRef = { ...input, id: existing?.id ?? randomUUID(), addedAt: existing?.addedAt ?? Date.now() };
+    // A different path, target or machine makes the old profile wrong.
+    if (existing && (existing.path !== d.path || existing.target !== d.target || existing.machineId !== d.machineId)) delete db.profiles[d.id];
+    db.datasets = [...db.datasets.filter((x) => x.id !== d.id), d];
+    await this.writeDatasets(db);
+    return this.datasetView(d, db);
+  }
+
+  async dataRemove(id: string): Promise<void> {
+    const db = await this.readDatasets();
+    // A removed download isn't added back by the next sync.
+    const gone = db.datasets.find((d) => d.id === id);
+    if (gone?.source) db.dismissedHub = [...new Set([...(db.dismissedHub ?? []), `${gone.machineId}:${gone.path}`])];
+    db.datasets = db.datasets.filter((d) => d.id !== id);
+    delete db.profiles[id];
+    await this.writeDatasets(db);
+  }
+
+  async dataBrowse(machineId: string, dir: string | null): Promise<BrowseResult> {
+    return (await this.dataTools(machineId)).browse(dir);
+  }
+
+  async dataProfile(id: string): Promise<DatasetView> {
+    const { db, d } = await this.findDataset(id);
+    const profile = await (await this.dataTools(d.machineId)).profile(d.path, d.target);
+    const updated: DatasetRef = { ...d, format: profile.format };
+    db.datasets = db.datasets.map((x) => (x.id === id ? updated : x));
+    db.profiles[id] = { profile, at: Date.now() };
+    await this.writeDatasets(db);
+    return this.datasetView(updated, db);
+  }
+
+  async dataPreview(id: string): Promise<PreprocessPreview> {
+    const { d } = await this.findDataset(id);
+    if (d.format === "images") throw new Error("Image transforms run in the loader while training; there's nothing to preview on files.");
+    if (d.format === "tensors") throw new Error("Array files are used as saved: there's no preprocessing to preview.");
+    return (await this.dataTools(d.machineId)).preview(generatePreprocessCode(d), 200);
+  }
+
+  async dataWriteCode(id: string): Promise<DataCodePaths> {
+    if (!this.project) throw new Error("Open a project folder first.");
+    const { db, d } = await this.findDataset(id);
+    const dir = path.join(this.project.path, "data");
+    await fs.mkdir(dir, { recursive: true });
+    const stem = dataStem(d.name);
+    let preprocessPath: string | null = null;
+    if (d.format !== "images" && d.format !== "tensors") {
+      preprocessPath = path.join(dir, `preprocess_${stem}.py`);
+      await fs.writeFile(preprocessPath, generatePreprocessCode(d));
+    }
+    const loaderPath = path.join(dir, `${stem}_loader.py`);
+    await fs.writeFile(loaderPath, generateLoaderCode(d, db.profiles[id]?.profile ?? null));
+    return { preprocessPath, loaderPath };
+  }
+
+  async dataRunPreprocess(id: string): Promise<{ runId: string }> {
+    const { d } = await this.findDataset(id);
+    if (d.format === "images") throw new Error("Image folders don't need a preprocessing run: the loader applies the transforms.");
+    if (d.format === "tensors") throw new Error("Array files are used as saved: there's nothing to preprocess.");
+    await this.dataWriteCode(id);
+    const m = this.findMachine(d.machineId);
+    return this.launchRun({ machineId: m.id, command: `${m.python} data/preprocess_${dataStem(d.name)}.py`, options: this.opts.settings().defaultOptions });
+  }
+
+  // ------------------------------------------------------------ model builder
+
+  /** Designs saved in the project's models/ folder, newest first. */
+  async builderList(): Promise<BuilderDesign[]> {
+    if (!this.project) return [];
+    const dir = path.join(this.project.path, "models");
+    const files = await fs.readdir(dir).catch(() => [] as string[]);
+    const out: BuilderDesign[] = [];
+    for (const f of files.filter((f) => f.endsWith(".converlt.json"))) {
+      const full = path.join(dir, f);
+      try {
+        const graph = JSON.parse(await fs.readFile(full, "utf8")) as ModelGraph;
+        out.push({ name: graph.name, file: full, updatedAt: (await fs.stat(full)).mtimeMs, graph });
+      } catch {
+        // not a design we can read; skip it
+      }
+    }
+    return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /**
+   * Writes models/<name>.py (the module) and models/<name>.converlt.json (the design, to reopen
+   * it). With `train`, the design must name a dataset from Data: this writes the dataset's loader
+   * and train_<name>.py, which trains on it, and returns the command plus the dataset's machine.
+   * A training script the user edited since Converlt wrote it is kept as train_<name>.py.bak.
+   */
+  async builderSave(graph: ModelGraph, train: boolean): Promise<BuilderSaveResult> {
+    if (!this.project) throw new Error("Open a project folder first: the model is saved into it.");
+    const analysis = analyzeGraph(graph);
+    const code = generateModelCode(graph, analysis);
+    const stem = fileStem(graph.name);
+    // Everything that can fail is checked before anything is written.
+    let trainCode: string | null = null;
+    let dataset: DatasetRef | null = null;
+    if (train) {
+      if (!graph.dataset) throw new Error("Choose the dataset to train on (Dataset, in the builder's top bar). Add one in Data first if the list is empty.");
+      const { db, d } = await this.findDataset(graph.dataset).catch(() => {
+        throw new Error("The dataset this design trains on was removed from Data. Choose another.");
+      });
+      dataset = d;
+      trainCode = generateTrainCode(graph, { name: d.name, loaderStem: dataStem(d.name), spec: datasetSpec(d, db.profiles[d.id]?.profile ?? null) }, analysis);
+    }
+    const dir = path.join(this.project.path, "models");
+    await fs.mkdir(dir, { recursive: true });
+    const modelPath = path.join(dir, `${stem}.py`);
+    await fs.writeFile(modelPath, code);
+    await fs.writeFile(path.join(dir, `${stem}.converlt.json`), JSON.stringify(graph, null, 1) + "\n");
+    if (!trainCode || !dataset) return { modelPath, trainPath: null, command: null, trainCreated: false, backupPath: null, machineId: null, datasetName: null };
+    await this.dataWriteCode(dataset.id);
+    const trainPath = path.join(this.project.path, `train_${stem}.py`);
+    const backupPath = await this.writeGenerated(trainPath, trainCode);
+    // Builder scripts are DDP-ready, so on a machine with several GPUs they train on all of them.
+    const gpus = this.probes[dataset.machineId]?.gpus?.length ?? 0;
+    const single = `python train_${stem}.py`;
+    return { modelPath, trainPath, command: multiGpuCommand(single, gpus) ?? single, trainCreated: true, backupPath, machineId: dataset.machineId, datasetName: dataset.name };
+  }
+
+  /**
+   * Writes a generated file, remembering its hash in .converge/generated.json. If the file on disk
+   * was changed since Converlt last wrote it, that version is kept as <file>.bak (returned).
+   * Old synthetic-data training scripts are replaced without a backup.
+   */
+  private async writeGenerated(file: string, content: string): Promise<string | null> {
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+    const ledgerPath = path.join(this.project!.path, ".converge", "generated.json");
+    const ledger: Record<string, string> = JSON.parse(await fs.readFile(ledgerPath, "utf8").catch(() => "{}"));
+    const key = path.relative(this.project!.path, file).replace(/\\/g, "/");
+    const current = await fs.readFile(file, "utf8").catch(() => null);
+    let backup: string | null = null;
+    if (current !== null && current !== content && ledger[key] !== sha(current) && !/on synthetic data/.test(current)) {
+      backup = `${file}.bak`;
+      await fs.writeFile(backup, current);
+    }
+    await fs.writeFile(file, content);
+    ledger[key] = sha(content);
+    await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
+    await fs.writeFile(ledgerPath, JSON.stringify(ledger, null, 1) + "\n");
+    return backup;
+  }
+
+  // ------------------------------------------------------------ code → graph
+
+  /** Project Python files that define a PyTorch nn.Module. */
+  async builderCodeFiles(): Promise<string[]> {
+    if (!this.project) return [];
+    return modelFiles(this.project.path);
+  }
+
+  /**
+   * Traces a model class from the project's code on a machine (torch.fx + one forward pass) and
+   * returns it as a builder graph. Without a class or input shape, returns what's needed.
+   */
+  async builderImport(req: ImportRequest & { machineId: string }): Promise<BuilderImportResult> {
+    if (!this.project) throw new Error("Open a project folder first.");
+    const m = this.findMachine(req.machineId);
+    if (!this.dataInstalled.has(m.id)) {
+      await this.agentFor(m).install(this.opts.resourcesDir);
+      this.dataInstalled.add(m.id);
+    }
+    const factory = this.opts.transportFactory ?? ((x) => transportFor(x, this.opts.settings().sshPath));
+    const files = await projectPythonFiles(this.project.path);
+    const r = await importModel(factory(m), m.python, files, req, (s) => explainSshError(s, m.host));
+    const base = { classes: r.classes ?? [], inputShape: r.inputShape ?? null, inputDtype: r.inputDtype ?? null, notes: r.notes ?? [] };
+    if (!r.ok) return { ...base, error: r.error ?? "The import failed.", need: null, summary: null };
+    if (!r.graph) return { ...base, error: null, need: r.need ?? "class", summary: null };
+    return { ...base, error: null, need: null, summary: importedToGraph(r.graph, r.torchParams ?? null, r.custom ?? []) };
   }
 
   // ------------------------------------------------------------ datasets & models hub
@@ -740,4 +1070,11 @@ export class ConvergeService {
     for (const id of fresh) void this.probeMachine(id).then((r) => this.startPendingRun(id, r)).catch(() => {});
     return views;
   }
+}
+
+interface DatasetDb {
+  datasets: DatasetRef[];
+  profiles: Record<string, { profile: DataProfile; at: number }>;
+  /** "machineId:path" of downloads the user removed from Data, so syncing doesn't add them back. */
+  dismissedHub?: string[];
 }

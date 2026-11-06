@@ -42,6 +42,12 @@ export function usePods(enabled: boolean) {
   return usePolled<CloudPodView[]>(() => (enabled ? api.gpuPods() : Promise.resolve([])), 8_000, [enabled]);
 }
 
+/** Converlt Cloud's tiers, by the data-center class a GPU runs in. */
+export const TIER: Record<"SECURE" | "COMMUNITY", { name: string; short: string; note: string }> = {
+  SECURE: { name: "Converlt Secure", short: "Secure", note: "Tier 3+ data centers: highest reliability, for long or sensitive runs" },
+  COMMUNITY: { name: "Converlt Flex", short: "Flex", note: "Vetted partner hosts: the lowest prices, great for experiments" },
+};
+
 export function formatCredits(n: number | null | undefined, digits = 2): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });

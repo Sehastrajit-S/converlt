@@ -75,7 +75,7 @@ const defSrc = path.join(ide, "extensions/converge-defaults");
 const defDst = path.join(vscode, "extensions/converge-defaults");
 await cp(defSrc, defDst, { recursive: true });
 const upstreamThemes = path.join(vscode, "extensions/theme-defaults/themes");
-for (const t of ["dark_modern.json", "dark_plus.json", "dark_vs.json", "light_modern.json", "light_plus.json", "light_vs.json"]) {
+for (const t of ["dark_modern.json", "dark_plus.json", "dark_vs.json", "light_modern.json", "light_plus.json", "light_vs.json", "hc_black.json"]) {
   await cp(path.join(upstreamThemes, t), path.join(defDst, "themes", t));
 }
 console.log("built-in extensions: converge, converge-defaults");

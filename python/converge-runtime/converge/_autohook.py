@@ -168,6 +168,19 @@ def _hook_datasets(module):
     module.load_dataset = load_dataset
 
 
+def _hub_commit(repo_id, revision):
+    """The commit a Hub revision ("main", a tag) resolved to, from the local Hugging Face cache."""
+    if revision and len(revision) == 40 and all(c in "0123456789abcdef" for c in revision):
+        return revision
+    cache = os.environ.get("HF_HUB_CACHE") or os.path.join(os.environ.get("HF_HOME") or os.path.join(os.path.expanduser("~"), ".cache", "huggingface"), "hub")
+    ref = os.path.join(cache, "models--" + str(repo_id).replace("/", "--"), "refs", revision or "main")
+    try:
+        with open(ref) as f:
+            return f.read().strip() or revision
+    except OSError:
+        return revision
+
+
 def _hook_transformers(module):
     base = getattr(module, "PreTrainedModel", None)
     method = base.__dict__.get("from_pretrained") if base is not None else None
@@ -187,7 +200,8 @@ def _hook_transformers(module):
             try:
                 source = args[0] if args else kwargs.get("pretrained_model_name_or_path")
                 config = getattr(model, "config", None)
-                rec = {"kind": "weights", "name": str(source), "revision": getattr(config, "_commit_hash", None) or kwargs.get("revision")}
+                revision = getattr(config, "_commit_hash", None) or kwargs.get("revision") or "main"
+                rec = {"kind": "weights", "name": str(source), "revision": _hub_commit(source, revision)}
                 if isinstance(source, (str, os.PathLike)) and os.path.isdir(str(source)):
                     rec = _inputs.describe(source, name=str(source), kind="weights")
                     rec["revision"] = getattr(config, "_commit_hash", None)

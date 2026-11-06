@@ -212,10 +212,28 @@ function Stats({ run }: { run: RunView }) {
       </Stat>
       <Stat
         icon={<Cpu size={13} />}
-        label={gpus[0]?.name ?? s.env?.gpus?.[0]?.name ?? "GPU"}
+        label={`${gpus.length > 1 ? `${gpus.length}× ` : ""}${gpus[0]?.name ?? s.env?.gpus?.[0]?.name ?? "GPU"}`}
         value={utils.length && live ? `${Math.round(utils.reduce((a, b) => a + b, 0) / utils.length)}%` : "—"}
-        sub={live ? `utilization${gpus[0]?.tempC != null ? ` · ${gpus[0].tempC}°C` : ""}${gpus[0]?.powerW != null ? ` · ${Math.round(gpus[0].powerW)} W` : ""}` : run.manifest.machine.name}
+        sub={live ? `${gpus.length > 1 ? "average " : ""}utilization${gpus.length === 1 && gpus[0]?.tempC != null ? ` · ${gpus[0].tempC}°C` : ""}${gpus.length === 1 && gpus[0]?.powerW != null ? ` · ${Math.round(gpus[0].powerW)} W` : ""}` : run.manifest.machine.name}
       />
+      {gpus.length > 1 && (
+        <div className="card per-gpu">
+          <div className="label">Per GPU</div>
+          {gpus.map((g) => (
+            <div key={g.index} className="per-gpu-row" title={g.utilPct !== null && g.utilPct < 20 && live ? "This GPU is barely used: the run may not be using every GPU (launch with torchrun / DDP)" : undefined}>
+              <span className="mono faint">GPU {g.index}</span>
+              <span className="per-gpu-bar">
+                <span style={{ width: `${g.utilPct ?? 0}%` }} className={g.utilPct !== null && g.utilPct < 20 && live ? "idle" : ""} />
+              </span>
+              <span className="mono">{g.utilPct ?? "—"}%</span>
+              <span className="mono faint">
+                {formatMiB(g.memUsedMiB)} / {formatMiB(g.memTotalMiB)}
+              </span>
+              {g.tempC != null && <span className="mono faint">{g.tempC}°C</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

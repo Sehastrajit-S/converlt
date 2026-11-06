@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Boxes, CircleCheck, CircleX, Cloud, FileText, LoaderCircle, Package, Plus, RefreshCw, Search, Server, Trash2, Zap } from "lucide-react";
 import type { Machine } from "@converge/run-protocol";
 import type { AppState, EnvInfo, EnvList, EnvOpResult, EnvPackage } from "@converge/core/api";
-import { api, errorMessage } from "../api.ts";
+import { api, errorMessage, ask } from "../api.ts";
 import { Dialog, Empty, Segmented, Switch, useToast } from "../components/ui.tsx";
 
 /** Whether runs on `m` use this environment's interpreter. */
@@ -83,7 +83,7 @@ function MachineEnvs({ machine }: { machine: Machine }) {
     }
   };
   const remove = async (env: EnvInfo) => {
-    if (!confirm(`Delete the environment ${env.name} on ${machine.name}? Its packages are removed.`)) return;
+    if (!(await ask(`Delete the environment ${env.name} on ${machine.name}? Its packages are removed.`, "Delete"))) return;
     try {
       await api.removeEnv(machine.id, env.name);
       toast("success", `Deleted ${env.name}`);

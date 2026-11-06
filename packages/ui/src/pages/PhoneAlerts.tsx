@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { BellRing, LoaderCircle, RefreshCw, Send, Smartphone } from "lucide-react";
 import qrcode from "qrcode-generator";
 import type { AppState } from "@converge/core/api";
-import { api, errorMessage } from "../api.ts";
+import { api, errorMessage, ask } from "../api.ts";
 import { useToast } from "../components/ui.tsx";
 
 const NTFY = "https://ntfy.sh";
@@ -118,7 +118,7 @@ export function PhoneAlerts({ state }: { state: AppState }) {
                 <button className="btn primary" disabled={!!busy} onClick={() => void test()}>
                   {busy === "test" ? <LoaderCircle size={14} className="spin" /> : <Send size={14} />} Send a test
                 </button>
-                <button className="btn" disabled={!!busy} onClick={() => confirm("Make a new topic? Phones subscribed to the old one stop getting alerts.") && void save(newTopicUrl())}>
+                <button className="btn" disabled={!!busy} onClick={async () => (await ask("Make a new topic? Phones subscribed to the old one stop getting alerts.", "New topic")) && void save(newTopicUrl())}>
                   <RefreshCw size={14} /> New topic
                 </button>
                 <button className="btn ghost" disabled={!!busy} onClick={() => void save(undefined)}>

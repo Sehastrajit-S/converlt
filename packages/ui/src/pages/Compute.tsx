@@ -2,20 +2,39 @@ import { useEffect, useState } from "react";
 import { CircleCheck, CircleX, HardDrive, LoaderCircle, Pencil, Plus, RefreshCw, Server, Thermometer, Trash } from "lucide-react";
 import type { Machine } from "@converge/run-protocol";
 import type { AppState, ProbeResult, TelemetryResult } from "@converge/core/api";
-import { api, errorMessage } from "../api.ts";
+import { api, errorMessage, ask } from "../api.ts";
 import { EnvIssues } from "../components/EnvIssues.tsx";
 import { Empty, Meter, useToast } from "../components/ui.tsx";
 import { formatMiB, timeAgo } from "../format.ts";
 
 export function Compute({ state, onAdd, onEdit }: { state: AppState; onAdd: () => void; onEdit: (m: Machine) => void }) {
+  const toast = useToast();
+  const [finding, setFinding] = useState(false);
+  const findLocal = async () => {
+    setFinding(true);
+    try {
+      const added = await api.discoverLocalMachines();
+      if (added.length) toast("success", `Added ${added.map((m) => m.name).join(", ")}`, "Checking its environment now.");
+      else toast("info", "No new local GPU", state.platform === "win32" ? "No WSL distribution with an NVIDIA GPU that isn't already here. Removed ones stay removed; add them back with Add machine." : "Local GPUs are found through WSL on Windows. On Linux, add this machine over SSH.");
+    } catch (e) {
+      toast("error", "Couldn't look for local GPUs", errorMessage(e));
+    } finally {
+      setFinding(false);
+    }
+  };
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <h1 className="page-title">Compute</h1>
-          <div className="page-sub">GPU machines reachable over SSH. Converlt installs a small, dependency-free agent in ~/.converge.</div>
+          <div className="page-sub">This PC's GPU (through WSL) and machines reachable over SSH. Converlt installs a small, dependency-free agent in ~/.converge.</div>
         </div>
         <div className="spacer" />
+        {state.platform === "win32" && (
+          <button className="btn" onClick={() => void findLocal()} disabled={finding}>
+            {finding ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />} Find this PC's GPU
+          </button>
+        )}
         <button className="btn primary" onClick={onAdd}>
           <Plus size={15} /> Add machine
         </button>
@@ -86,7 +105,7 @@ function MachineCard({ machine, probe, onEdit }: { machine: Machine; probe?: Pro
   }, [machine.id, probe?.ok, probe?.at]);
 
   const remove = async () => {
-    if (!confirm(`Remove ${machine.name}? Runs that used it keep their history.`)) return;
+    if (!(await ask(`Remove ${machine.name}? Runs that used it keep their history.`, "Remove"))) return;
     await api.removeMachine(machine.id);
   };
 

@@ -15,6 +15,18 @@ export function setApi(impl: ConvergeApi): void {
   api = impl;
 }
 
+/**
+ * Asks before something destructive. Uses the host's native dialog: inside a VS Code webview
+ * window.confirm returns false without showing anything, which would silently cancel the action.
+ */
+export async function ask(message: string, confirmLabel: string): Promise<boolean> {
+  try {
+    return await api.confirmAction(message, confirmLabel);
+  } catch {
+    return window.confirm(message);
+  }
+}
+
 export function useAppState(): [AppState | null, () => Promise<void>] {
   const [state, setState] = useState<AppState | null>(null);
   const refresh = useCallback(async () => setState(await api.getState()), []);

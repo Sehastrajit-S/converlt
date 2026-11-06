@@ -168,6 +168,9 @@ export class CloudTree implements vscode.TreeDataProvider<CloudItem> {
         }),
         new CloudItem("Environments", { icon: "package", command: open("converge.openEnvironments", "Open Environments") }),
         new CloudItem("Datasets & Models", { icon: "database", command: open("converge.openHub", "Open Datasets & Models") }),
+        new CloudItem("Data", { icon: "table", description: "load · explore · preprocess", command: open("converge.openData", "Open Data") }),
+        new CloudItem("Model Builder", { icon: "type-hierarchy", description: "drag and drop", command: open("converge.openModelBuilder", "Open Model Builder") }),
+        new CloudItem("Themes", { icon: "symbol-color", description: "look and feel", command: open("converge.openThemes", "Choose Theme") }),
       ];
     const live = pods.filter((p) => p.status !== "terminated");
     const podItems = live.map(
@@ -199,6 +202,8 @@ export class CloudTree implements vscode.TreeDataProvider<CloudItem> {
       new CloudItem("Models", { icon: "sparkle", description: "OpenRouter", command: open("converge.openModels", "Open Models") }),
       new CloudItem("Environments", { icon: "package", command: open("converge.openEnvironments", "Open Environments") }),
       new CloudItem("Datasets & Models", { icon: "database", description: "Hugging Face · Kaggle", command: open("converge.openHub", "Open Datasets & Models") }),
+      new CloudItem("Data", { icon: "table", description: "load · explore · preprocess", command: open("converge.openData", "Open Data") }),
+      new CloudItem("Model Builder", { icon: "type-hierarchy", description: "drag and drop", command: open("converge.openModelBuilder", "Open Model Builder") }),
     ];
   }
 }

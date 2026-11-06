@@ -10,6 +10,10 @@ import type {
   RunOptions,
   RunStatus,
   RunExplanation,
+  ModelGraph,
+  DatasetRef,
+  DataProfile,
+  ImportSummary,
   RunSummary,
 } from "@converge/run-protocol";
 import type { CloudPod, CloudStatus, GpuOffer, LaunchPodRequest, LedgerEntry, ModelInfo, SpendLimits, WalletSummary } from "./cloudApi.ts";
@@ -259,6 +263,95 @@ export interface HubAccounts {
   kaggle: boolean;
 }
 
+// ------------------------------------------------------------ data
+
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  dir: boolean;
+  size: number | null;
+  format: string | null;
+}
+
+export interface BrowseResult {
+  dir: string;
+  parent: string | null;
+  entries: BrowseEntry[];
+}
+
+export interface PreviewTable {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  shape: [number, number];
+}
+
+export interface PreprocessPreview {
+  before: PreviewTable;
+  after: PreviewTable;
+  splits: Record<string, number>;
+  /** Missing values left after the pipeline. */
+  missing: number;
+  /** Feature columns that still aren't numbers (a model can't take them yet). */
+  nonNumeric: string[];
+}
+
+export interface DatasetView {
+  dataset: DatasetRef;
+  profile: DataProfile | null;
+  profiledAt: number | null;
+  machineName: string | null;
+}
+
+export interface DataCodePaths {
+  /** data/preprocess_<name>.py; null for image folders, which preprocess in the loader. */
+  preprocessPath: string | null;
+  loaderPath: string;
+}
+
+// ------------------------------------------------------------ model builder
+
+export interface BuilderDesign {
+  name: string;
+  /** models/<name>.converlt.json */
+  file: string;
+  updatedAt: number;
+  graph: ModelGraph;
+}
+
+export interface UiThemeState {
+  /** Active color theme id, e.g. "Converlt Midnight". */
+  current: string;
+  /** Switch between the preferred dark and light themes with the OS. */
+  followSystem: boolean;
+}
+
+export interface BuilderImportResult {
+  /** nn.Module classes defined in the file. */
+  classes: string[];
+  /** The file's INPUT_SHAPE / INPUT_DTYPE when it defines them, or what was asked for. */
+  inputShape: number[] | null;
+  inputDtype: "float" | "long" | null;
+  /** Set when the class or input shape must be chosen before tracing. */
+  need: "class" | "shape" | null;
+  error: string | null;
+  notes: string[];
+  summary: ImportSummary | null;
+}
+
+export interface BuilderSaveResult {
+  modelPath: string;
+  trainPath: string | null;
+  /** Runs the training script, when one was asked for. */
+  command: string | null;
+  /** True when train_<name>.py was written. */
+  trainCreated: boolean;
+  /** Where an edited training script was kept before it was rewritten. */
+  backupPath: string | null;
+  /** The machine holding the dataset: training runs there. */
+  machineId: string | null;
+  datasetName: string | null;
+}
+
 // ------------------------------------------------------------ cloud
 
 /** Whether the coding agents in the editor can use Converlt's tools (through its MCP server). */
@@ -301,6 +394,8 @@ export interface ConvergeApi {
   addMachine(input: MachineInput): Promise<Machine>;
   updateMachine(id: string, input: MachineInput): Promise<Machine>;
   removeMachine(id: string): Promise<void>;
+  /** Adds this computer's GPUs (through WSL) that aren't registered yet. */
+  discoverLocalMachines(): Promise<Machine[]>;
   probeMachine(id: string): Promise<ProbeResult>;
   machineTelemetry(id: string): Promise<TelemetryResult>;
 
@@ -333,6 +428,26 @@ export interface ConvergeApi {
   useEnv(machineId: string, python: string): Promise<Machine>;
   /** The open project's requirements.txt, if it has one. */
   projectRequirements(): Promise<string | null>;
+
+  // Data: datasets on machines, their profiles (EDA), preprocessing pipelines, and loaders.
+  dataList(): Promise<DatasetView[]>;
+  /** Adds completed Datasets & models downloads to the list; returns the ones added. */
+  dataSyncHub(): Promise<DatasetView[]>;
+  dataSave(dataset: Omit<DatasetRef, "id" | "addedAt"> & { id?: string }): Promise<DatasetView>;
+  dataRemove(id: string): Promise<void>;
+  dataBrowse(machineId: string, dir: string | null): Promise<BrowseResult>;
+  dataProfile(id: string): Promise<DatasetView>;
+  dataPreview(id: string): Promise<PreprocessPreview>;
+  dataWriteCode(id: string): Promise<DataCodePaths>;
+  /** Writes the scripts and runs preprocessing on the dataset's machine as a tracked run. */
+  dataRunPreprocess(id: string): Promise<{ runId: string }>;
+
+  // Model builder: designs live in the project's models/ folder.
+  builderList(): Promise<BuilderDesign[]>;
+  builderSave(graph: ModelGraph, train: boolean): Promise<BuilderSaveResult>;
+  /** Code → graph: project files that define a PyTorch module, and one of them traced into a graph. */
+  builderCodeFiles(): Promise<string[]>;
+  builderImport(req: { file: string; className?: string | null; inputShape?: number[] | null; dtype?: "float" | "long" | null; timesteps?: number | null; machineId: string }): Promise<BuilderImportResult>;
 
   // Datasets and models from Hugging Face and Kaggle, downloaded onto machines.
   hubSearch(source: HubSource, kind: HubKind, query: string): Promise<HubItem[]>;
@@ -377,6 +492,13 @@ export interface ConvergeApi {
   agentsStatus(): Promise<AgentsStatus>;
   agentsConnect(which: { claudeCode: boolean; codex: boolean }): Promise<AgentsStatus>;
   modelComplete(model: string, prompt: string): Promise<ModelReply>;
+
+  /** A native yes/no dialog. Webviews can't show window.confirm (it returns false without asking). */
+  confirmAction(message: string, confirmLabel: string): Promise<boolean>;
+
+  /** The IDE color theme, which Converlt's pages follow. */
+  uiTheme(): Promise<UiThemeState>;
+  setUiTheme(change: { theme?: string; followSystem?: boolean }): Promise<UiThemeState>;
 
   onRunsChanged(cb: (runIds: string[]) => void): () => void;
   onStateChanged(cb: () => void): () => void;

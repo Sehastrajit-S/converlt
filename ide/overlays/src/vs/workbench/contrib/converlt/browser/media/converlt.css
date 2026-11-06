@@ -1,5 +1,5 @@
 /*---------------------------------------------------------------------------------------------
- *  Converlt title bar: mode switch, compute target and credits.
+ *  Converlt title bar: mode switch, current run, compute target and credits.
  *--------------------------------------------------------------------------------------------*/
 
 .monaco-action-bar .action-item.converlt-titlebar-item {
@@ -133,3 +133,64 @@
 	border-color: var(--vscode-inputValidation-errorBorder, #f25767);
 }
 
+/* Current run */
+.converlt-title .converlt-seg.run .converlt-label {
+	max-width: 120px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-weight: 600;
+}
+
+.converlt-title .converlt-seg.run .converlt-dot.running {
+	animation: converlt-pulse 1.6s ease-in-out infinite;
+}
+
+.converlt-title .converlt-seg.run .converlt-progress {
+	width: 46px;
+	height: 4px;
+	border-radius: 2px;
+	background: var(--vscode-progressBar-background, #0e70c0);
+	background: color-mix(in srgb, var(--vscode-progressBar-background, #0e70c0) 25%, transparent);
+	overflow: hidden;
+}
+
+.converlt-title .converlt-seg.run .converlt-progress > span {
+	display: block;
+	height: 100%;
+	background: var(--vscode-progressBar-background, #0e70c0);
+}
+
+.converlt-title .converlt-seg.run .converlt-sub {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	font-variant-numeric: tabular-nums;
+}
+
+.converlt-title .converlt-seg.run .converlt-sub.metric {
+	font-family: var(--monaco-monospace-font);
+}
+
+.converlt-title .converlt-seg.run.warning {
+	border-color: var(--vscode-inputValidation-warningBorder, #f2a93b);
+}
+
+.converlt-title .converlt-seg.run.warning .codicon-warning {
+	color: var(--vscode-editorWarning-foreground, #f2a93b);
+}
+
+.converlt-title .converlt-seg.run.error,
+.converlt-title .converlt-seg.run.failed {
+	border-color: var(--vscode-inputValidation-errorBorder, #f25767);
+}
+
+.converlt-title .converlt-seg.run .codicon-error {
+	color: var(--vscode-editorError-foreground, #f25767);
+}
+
+.converlt-title .converlt-badge {
+	font-size: 10px;
+	padding: 0 5px;
+	border-radius: 8px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+}
