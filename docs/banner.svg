@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Converlt</title>
+  <desc id="desc">Converlt, the ML-native IDE: train on any GPU, see why runs fail, and reproduce anyone's run exactly.</desc>
+  <defs>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8b6cff"/>
+      <stop offset="1" stop-color="#2fd0c4"/>
+    </linearGradient>
+    <linearGradient id="brandH" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a48bff"/>
+      <stop offset="1" stop-color="#2fd0c4"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8b6cff" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#8b6cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#2fd0c4" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#2fd0c4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8b6cff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#8b6cff" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="#000" stop-opacity="1"/>
+    </linearGradient>
+    <mask id="gridMask"><rect width="1280" height="640" fill="url(#fade)"/></mask>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <style>
+    text { font-family: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; }
+    .mono { font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, Menlo, monospace; }
+  </style>
+
+  <!-- background -->
+  <rect width="1280" height="640" fill="#0b0d12"/>
+  <rect width="1280" height="640" fill="url(#grid)" mask="url(#gridMask)"/>
+  <circle cx="1010" cy="170" r="420" fill="url(#glowA)"/>
+  <circle cx="1180" cy="600" r="360" fill="url(#glowB)"/>
+  <circle cx="90" cy="40" r="260" fill="url(#glowA)" opacity="0.5"/>
+
+  <!-- left: logo, name, tagline -->
+  <g transform="translate(88 132)">
+    <g transform="scale(0.3125)">
+      <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#brand)"/>
+      <g fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M128 52 52 90l76 38 76-38-76-38Z"/>
+        <path d="m52 166 76 38 76-38"/>
+        <path d="m52 128 76 38 76-38"/>
+      </g>
+    </g>
+    <text x="98" y="56" font-size="56" font-weight="700" fill="#f3f5f9" letter-spacing="-1.5">Converlt</text>
+  </g>
+
+  <text x="88" y="270" font-size="44" font-weight="700" fill="#f3f5f9" letter-spacing="-1">The ML-native IDE.</text>
+  <text x="88" y="324" font-size="44" font-weight="700" fill="url(#brandH)" letter-spacing="-1">From dataset to result.</text>
+
+  <text x="88" y="380" font-size="20" fill="#a4acbd">Train on any GPU, see why runs fail, and</text>
+  <text x="88" y="408" font-size="20" fill="#a4acbd">reproduce anyone's run exactly.</text>
+
+  <!-- workflow chips -->
+  <g font-size="15" font-weight="600" fill="#cfd5e2">
+    <g transform="translate(88 452)">
+      <rect width="72" height="34" rx="17" fill="#171b24" stroke="#262c3a"/><text x="36" y="22" text-anchor="middle">Data</text>
+    </g>
+    <g transform="translate(168 452)">
+      <rect width="80" height="34" rx="17" fill="#171b24" stroke="#262c3a"/><text x="40" y="22" text-anchor="middle">Model</text>
+    </g>
+    <g transform="translate(256 452)">
+      <rect width="72" height="34" rx="17" fill="#8b6cff" fill-opacity="0.16" stroke="#8b6cff" stroke-opacity="0.6"/><text x="36" y="22" text-anchor="middle" fill="#c9bbff">Train</text>
+    </g>
+    <g transform="translate(336 452)">
+      <rect width="96" height="34" rx="17" fill="#171b24" stroke="#262c3a"/><text x="48" y="22" text-anchor="middle">Evaluate</text>
+    </g>
+    <g transform="translate(440 452)">
+      <rect width="104" height="34" rx="17" fill="#171b24" stroke="#262c3a"/><text x="52" y="22" text-anchor="middle">Reproduce</text>
+    </g>
+  </g>
+
+  <text x="88" y="560" font-size="15" fill="#6c7589" class="mono">Open source · Apache-2.0 · Built on Code - OSS</text>
+
+  <!-- right: a run card -->
+  <g transform="translate(690 108)" filter="url(#shadow)">
+    <rect width="500" height="424" rx="18" fill="#12151c" stroke="#262c3a"/>
+    <!-- title bar -->
+    <circle cx="26" cy="26" r="5.5" fill="#ff5f57" opacity="0.85"/>
+    <circle cx="44" cy="26" r="5.5" fill="#febc2e" opacity="0.85"/>
+    <circle cx="62" cy="26" r="5.5" fill="#28c840" opacity="0.85"/>
+    <text x="250" y="31" font-size="13" fill="#6c7589" text-anchor="middle" class="mono">train.py · RTX 4090</text>
+    <line x1="0" y1="52" x2="500" y2="52" stroke="#262c3a"/>
+
+    <!-- run header -->
+    <text x="28" y="92" font-size="22" font-weight="700" fill="#f3f5f9">run-012</text>
+    <g transform="translate(124 74)">
+      <rect width="92" height="26" rx="13" fill="#34c77b" fill-opacity="0.14"/>
+      <circle cx="16" cy="13" r="4.5" fill="#34c77b"/>
+      <text x="28" y="18" font-size="13" font-weight="600" fill="#5ee09a">running</text>
+    </g>
+    <text x="472" y="92" font-size="13" fill="#6c7589" text-anchor="end" class="mono">step 4,800 / 6,000</text>
+
+    <!-- stats -->
+    <g font-size="12" fill="#6c7589">
+      <text x="28" y="132">val/loss</text>
+      <text x="148" y="132">accuracy</text>
+      <text x="268" y="132">GPU</text>
+      <text x="370" y="132">cost</text>
+    </g>
+    <g font-size="20" font-weight="700" fill="#e7eaf0" class="mono">
+      <text x="28" y="160">0.214</text>
+      <text x="148" y="160">94.2%</text>
+      <text x="268" y="160">97%</text>
+      <text x="370" y="160">$1.38</text>
+    </g>
+
+    <!-- chart -->
+    <g transform="translate(28 186)">
+      <rect width="444" height="150" rx="10" fill="#0e1117" stroke="#1f2430"/>
+      <g stroke="#ffffff" stroke-opacity="0.05">
+        <line x1="0" y1="38" x2="444" y2="38"/>
+        <line x1="0" y1="75" x2="444" y2="75"/>
+        <line x1="0" y1="112" x2="444" y2="112"/>
+      </g>
+      <path d="M0 18 C 30 24, 48 62, 80 76 S 140 96, 180 104 S 250 114, 300 119 S 380 124, 444 126 L444 150 L0 150 Z" fill="url(#area)"/>
+      <path d="M0 18 C 30 24, 48 62, 80 76 S 140 96, 180 104 S 250 114, 300 119 S 380 124, 444 126" fill="none" stroke="#a48bff" stroke-width="3" stroke-linecap="round"/>
+      <path d="M0 24 C 34 30, 60 52, 96 62 S 160 78, 210 84 S 290 92, 340 95 S 400 98, 444 99" fill="none" stroke="#2fd0c4" stroke-width="2" stroke-dasharray="5 6" stroke-linecap="round" opacity="0.8"/>
+      <circle cx="444" cy="126" r="5" fill="#a48bff" stroke="#0e1117" stroke-width="2"/>
+      <text x="432" y="92" font-size="11" fill="#2fd0c4" text-anchor="end" class="mono" opacity="0.9">run-009</text>
+      <text x="432" y="144" font-size="11" fill="#b9a6ff" text-anchor="end" class="mono">run-012</text>
+    </g>
+
+    <!-- insight -->
+    <g transform="translate(28 354)">
+      <rect width="444" height="46" rx="10" fill="#4aa8ff" fill-opacity="0.1" stroke="#4aa8ff" stroke-opacity="0.25"/>
+      <circle cx="22" cy="23" r="9" fill="none" stroke="#4aa8ff" stroke-width="2"/>
+      <path d="M22 19v5M22 27.5v.5" stroke="#4aa8ff" stroke-width="2" stroke-linecap="round"/>
+      <text x="42" y="28" font-size="14" fill="#cfe5ff">3.1% better than run-009 · likely cause: <tspan font-weight="700" fill="#ffffff">lr 3e-4 → 1e-4</tspan></text>
+    </g>
+  </g>
+</svg>

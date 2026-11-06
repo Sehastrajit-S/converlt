@@ -1,6 +1,10 @@
+<p align="center"><img src="docs/banner.png" alt="Converlt: the ML-native IDE. Train on any GPU, see why runs fail, and reproduce anyone's run exactly." width="100%"></p>
+
 # Converlt
 
 The ML-native IDE that connects your code, GPUs, and experiments.
+
+**[Download Converlt for Windows](https://github.com/Sehastrajit-S/converlt/releases/latest)** · unzip and run `Converlt.exe`. macOS and Linux builds aren't available yet.
 
 Converlt is a code editor built on Code-OSS, the open-source core of VS Code, the same approach Cursor took. You write PyTorch code as in VS Code. From the editor you can launch training on any GPU you can reach: a cloud box over SSH, a RunPod GPU paid from Converlt credits, or your local GPU through WSL. Converlt syncs your code, runs it under a supervisor on that machine, and streams back logs, metrics, and GPU telemetry. It flags NaN losses, CUDA OOMs, and crashes (down to the failing line in your code), and records every run so you can compare and reproduce it. Training keeps running if you close the editor.
 
